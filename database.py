@@ -67,11 +67,18 @@ def init_database():
             dispatch_notes TEXT,
             return_notes TEXT,
             status TEXT NOT NULL DEFAULT 'dispatched',
+            grade TEXT,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (customer_id) REFERENCES customers (id),
             FOREIGN KEY (cylinder_id) REFERENCES cylinders (id)
         )
     ''')
+
+    # Add grade column if it doesn't exist (for existing databases)
+    try:
+        cursor.execute("ALTER TABLE dispatches ADD COLUMN grade TEXT")
+    except sqlite3.OperationalError:
+        pass  # Column already exists
 
     # Create users table for authentication
     cursor.execute('''
@@ -225,7 +232,7 @@ def get_cylinders_by_status(status):
     return cylinders
 
 # Dispatch operations
-def dispatch_cylinders(customer_id, cylinder_ids, dispatch_date, dispatch_notes, dc_number=None):
+def dispatch_cylinders(customer_id, cylinder_ids, dispatch_date, dispatch_notes, dc_number=None, grade=None):
     """Dispatch multiple cylinders to a customer with a DC number."""
     if not cylinder_ids:
         raise ValueError("At least one cylinder must be selected")
@@ -260,9 +267,9 @@ def dispatch_cylinders(customer_id, cylinder_ids, dispatch_date, dispatch_notes,
         # Now dispatch all cylinders
         for cylinder_id in cylinder_ids:
             cursor.execute('''
-                INSERT INTO dispatches (dc_number, customer_id, cylinder_id, dispatch_date, dispatch_notes, status)
-                VALUES (?, ?, ?, ?, ?, 'dispatched')
-            ''', (dc_number, customer_id, cylinder_id, dispatch_date, dispatch_notes))
+                INSERT INTO dispatches (dc_number, customer_id, cylinder_id, dispatch_date, dispatch_notes, status, grade)
+                VALUES (?, ?, ?, ?, ?, 'dispatched', ?)
+            ''', (dc_number, customer_id, cylinder_id, dispatch_date, dispatch_notes, grade))
             # Update cylinder status
             cursor.execute("UPDATE cylinders SET status = 'dispatched' WHERE id = ?", (cylinder_id,))
         conn.commit()
@@ -315,7 +322,7 @@ def get_all_dispatches():
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT d.*, c.name as customer_name, cy.cylinder_id as cylinder_id_text, cy.cylinder_type as cylinder_type
+        SELECT d.id, d.dc_number, d.customer_id, d.cylinder_id, d.dispatch_date, d.return_date, d.dispatch_notes, d.return_notes, d.status, d.grade, d.created_at, c.name as customer_name, cy.cylinder_id as cylinder_id_text, cy.cylinder_type as cylinder_type
         FROM dispatches d
         JOIN customers c ON d.customer_id = c.id
         JOIN cylinders cy ON d.cylinder_id = cy.id
@@ -330,7 +337,7 @@ def get_dispatches_by_dc(dc_number):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT d.*, c.name as customer_name, cy.cylinder_id as cylinder_id_text, cy.cylinder_type as cylinder_type
+        SELECT d.id, d.dc_number, d.customer_id, d.cylinder_id, d.dispatch_date, d.return_date, d.dispatch_notes, d.return_notes, d.status, d.grade, d.created_at, c.name as customer_name, cy.cylinder_id as cylinder_id_text, cy.cylinder_type as cylinder_type
         FROM dispatches d
         JOIN customers c ON d.customer_id = c.id
         JOIN cylinders cy ON d.cylinder_id = cy.id
@@ -360,7 +367,7 @@ def get_dispatches_by_customer(customer_id):
     conn = get_connection()
     cursor = conn.cursor()
     cursor.execute('''
-        SELECT d.*, cy.cylinder_id as cylinder_id_text
+        SELECT d.id, d.dc_number, d.customer_id, d.cylinder_id, d.dispatch_date, d.return_date, d.dispatch_notes, d.return_notes, d.status, d.grade, d.created_at, cy.cylinder_id as cylinder_id_text
         FROM dispatches d
         JOIN cylinders cy ON d.cylinder_id = cy.id
         WHERE d.customer_id = ?

@@ -12,7 +12,7 @@ class LoginWindow:
         self.on_login_success = on_login_success
         self.root = tk.Tk()
         self.root.title("Cylinder Management System - Login")
-        self.root.geometry("450x350")
+        self.root.geometry("500x400")
         self.root.resizable(False, False)
 
         # Center the window
@@ -27,7 +27,7 @@ class LoginWindow:
 
         # Main container
         main_frame = tk.Frame(self.root, bg='#f0f0f0')
-        main_frame.pack(expand=True, fill=tk.BOTH, padx=30, pady=30)
+        main_frame.pack(expand=True, fill=tk.BOTH, padx=40, pady=40)
 
         # Title
         title_label = tk.Label(main_frame, text="Cylinder Management System",

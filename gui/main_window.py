@@ -116,7 +116,10 @@ class MainWindow:
         current_tab = self.notebook.index(self.notebook.select())
         tab_text = self.notebook.tab(current_tab, "text")
 
-        if tab_text == "Dispatch & Returns" and self.dispatch_frame:
+        if tab_text == "Inventory Management" and self.inventory_frame:
+            # Refresh inventory frame data
+            self.inventory_frame.load_cylinders()
+        elif tab_text == "Dispatch & Returns" and self.dispatch_frame:
             # Refresh dispatch frame data
             self.dispatch_frame.load_customers()
             self.dispatch_frame.load_available_cylinders()

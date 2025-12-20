@@ -3,9 +3,11 @@
 Dispatch model for Cylinder Management System
 """
 
+from database import get_connection
+
 class Dispatch:
     def __init__(self, id=None, dc_number="", customer_id=None, cylinder_id=None, dispatch_date=None, return_date=None,
-                 dispatch_notes="", return_notes="", status="dispatched", created_at=None,
+                 dispatch_notes="", return_notes="", status="dispatched", grade="", created_at=None,
                  customer_name="", cylinder_id_text="", cylinder_type=""):
         self.id = id
         self.dc_number = dc_number
@@ -16,6 +18,7 @@ class Dispatch:
         self.dispatch_notes = dispatch_notes
         self.return_notes = return_notes
         self.status = status
+        self.grade = grade
         self.created_at = created_at
         self.customer_name = customer_name
         self.cylinder_id_text = cylinder_id_text
@@ -34,10 +37,11 @@ class Dispatch:
             dispatch_notes=row[6],
             return_notes=row[7],
             status=row[8],
-            created_at=row[9],
-            customer_name=row[10],
-            cylinder_id_text=row[11],
-            cylinder_type=row[12]
+            grade=row[9],
+            created_at=row[10],
+            customer_name=row[11],
+            cylinder_id_text=row[12],
+            cylinder_type=row[13]
         )
 
     def to_dict(self):
@@ -51,6 +55,15 @@ class Dispatch:
             'Dispatch Date': self.dispatch_date,
             'Return Date': self.return_date,
             'Status': self.status,
+            'Grade': self.grade,
             'Dispatch Notes': self.dispatch_notes,
             'Return Notes': self.return_notes
         }
+
+    def delete(self):
+        """Delete this dispatch record from the database."""
+        conn = get_connection()
+        cursor = conn.cursor()
+        cursor.execute("DELETE FROM dispatches WHERE id = ?", (self.id,))
+        conn.commit()
+        conn.close()
