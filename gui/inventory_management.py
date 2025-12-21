@@ -14,6 +14,8 @@ class InventoryManagementFrame(ttk.Frame):
         self.cylinders = []
         self.status_options = ['available', 'dispatched', 'returned', 'refill', 'maintenance']
         self.check_vars = {}
+        self.select_all_var = tk.BooleanVar()
+        self.status_notebook = None
         self.create_widgets()
         self.load_cylinders()
 
@@ -38,13 +40,7 @@ class InventoryManagementFrame(ttk.Frame):
         self.search_entry.pack(side=tk.LEFT, padx=5, pady=5)
         self.search_entry.bind('<KeyRelease>', self.on_search)
 
-        tk.Label(search_frame, text="Filter by Status:", font=("Arial", 9),
-                bg='#f8f9fa', fg='#2c3e50').pack(side=tk.LEFT, padx=10, pady=5)
-        self.status_var = tk.StringVar(value="All")
-        status_combo = ttk.Combobox(search_frame, textvariable=self.status_var,
-                                   values=["All"] + self.status_options, state="readonly", width=15)
-        status_combo.pack(side=tk.LEFT, padx=5, pady=5)
-        status_combo.bind('<<ComboboxSelected>>', self.on_filter_status)
+        # Status filter removed, replaced with tabs
 
         # Buttons frame
         buttons_frame = tk.Frame(self, bg='#f0f0f0')
@@ -71,8 +67,17 @@ class InventoryManagementFrame(ttk.Frame):
                  command=self.generate_report).pack(side=tk.LEFT, padx=5)
 
         tk.Button(buttons_frame, text="Refresh", font=("Arial", 9, "bold"),
-                 bg='#2196F3', fg='white', relief='raised', bd=1, padx=10, pady=3,
-                 command=self.load_cylinders).pack(side=tk.LEFT, padx=5)
+                  bg='#2196F3', fg='white', relief='raised', bd=1, padx=10, pady=3,
+                  command=self.load_cylinders).pack(side=tk.LEFT, padx=5)
+
+        # Status tabs
+        self.status_notebook = ttk.Notebook(self)
+        self.status_notebook.pack(fill=tk.X, padx=15, pady=5)
+        for status in ["All"] + self.status_options:
+            tab_frame = ttk.Frame(self.status_notebook)
+            self.status_notebook.add(tab_frame, text=status)
+        self.status_notebook.select(0)  # Select All
+        self.status_notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
 
         # Custom table with radio buttons
         self.table_frame = ttk.Frame(self)
@@ -100,8 +105,24 @@ class InventoryManagementFrame(ttk.Frame):
         # Header
         self.create_table_header()
 
+        # Select all
+        self.create_select_all()
+
     def _on_mousewheel(self, event):
         self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
+
+    def create_select_all(self):
+        """Create select all checkbox."""
+        select_frame = ttk.Frame(self.table_frame)
+        select_frame.pack(before=self.canvas, fill=tk.X)
+        select_all_cb = tk.Checkbutton(select_frame, text="Select All", variable=self.select_all_var, command=self.toggle_select_all)
+        select_all_cb.pack(side=tk.LEFT, padx=10, pady=5)
+
+    def toggle_select_all(self):
+        """Toggle select all checkboxes."""
+        state = self.select_all_var.get()
+        for var in self.check_vars.values():
+            var.set(state)
 
     def create_table_header(self):
         """Create table header."""
@@ -111,7 +132,7 @@ class InventoryManagementFrame(ttk.Frame):
         ttk.Label(header_frame, text="Select", width=8, font=("Arial", 9, "bold")).grid(row=0, column=0, padx=2)
         ttk.Label(header_frame, text="ID", width=5, font=("Arial", 9, "bold")).grid(row=0, column=1, padx=2)
         ttk.Label(header_frame, text="Cylinder ID", width=15, font=("Arial", 9, "bold")).grid(row=0, column=2, padx=2)
-        ttk.Label(header_frame, text="Type", width=15, font=("Arial", 9, "bold")).grid(row=0, column=3, padx=2)
+        ttk.Label(header_frame, text="Product", width=15, font=("Arial", 9, "bold")).grid(row=0, column=3, padx=2)
         ttk.Label(header_frame, text="Status", width=20, font=("Arial", 9, "bold")).grid(row=0, column=4, padx=2)
         ttk.Label(header_frame, text="Location", width=15, font=("Arial", 9, "bold")).grid(row=0, column=5, padx=2)
 
@@ -150,6 +171,7 @@ class InventoryManagementFrame(ttk.Frame):
                 widget.destroy()
 
         self.check_vars = {}
+        self.select_all_var.set(False)
         for i, cylinder_row in enumerate(self.cylinders, 1):
             cylinder = Cylinder.from_db_row(cylinder_row)
             self.create_table_row(cylinder, i)
@@ -163,6 +185,7 @@ class InventoryManagementFrame(ttk.Frame):
 
         self.cylinders = get_all_cylinders()
         self.check_vars = {}  # Store checkbox variables
+        self.select_all_var.set(False)
 
         for i, cylinder_row in enumerate(self.cylinders, 1):
             cylinder = Cylinder.from_db_row(cylinder_row)
@@ -172,18 +195,37 @@ class InventoryManagementFrame(ttk.Frame):
         """Handle search functionality."""
         query = self.search_var.get().strip()
         if query:
-            self.cylinders = search_cylinders(query)
+            all_cylinders = search_cylinders(query)
         else:
-            self.cylinders = get_all_cylinders()
+            all_cylinders = get_all_cylinders()
+        current_status = self.get_current_status()
+        if current_status == "All":
+            self.cylinders = all_cylinders
+        else:
+            self.cylinders = [c for c in all_cylinders if Cylinder.from_db_row(c).status == current_status.lower()]
         self.refresh_table()
 
-    def on_filter_status(self, event=None):
+    def get_current_status(self):
+        """Get the currently selected status tab."""
+        current_tab = self.status_notebook.index(self.status_notebook.select())
+        return self.status_notebook.tab(current_tab, "text")
+
+    def on_tab_changed(self, event):
+        """Handle tab change to filter by status."""
+        status = self.get_current_status()
+        self.on_filter_status(status)
+
+    def on_filter_status(self, status):
         """Handle status filtering."""
-        status = self.status_var.get()
-        if status == "All":
-            self.cylinders = get_all_cylinders()
+        query = self.search_var.get().strip()
+        if query:
+            all_cylinders = search_cylinders(query)
         else:
-            self.cylinders = get_cylinders_by_status(status)
+            all_cylinders = get_all_cylinders()
+        if status == "All":
+            self.cylinders = all_cylinders
+        else:
+            self.cylinders = [c for c in all_cylinders if Cylinder.from_db_row(c).status == status.lower()]
         self.refresh_table()
 
     def add_cylinder(self):
@@ -237,49 +279,51 @@ class InventoryManagementFrame(ttk.Frame):
             messagebox.showerror("Error", f"Failed to delete cylinder: {e}")
 
     def update_status(self):
-        """Update status of selected cylinders (bulk)."""
+        """Update status of selected cylinders."""
         selected_ids = [cid for cid, var in self.check_vars.items() if var.get()]
         if not selected_ids:
             messagebox.showwarning("Warning", "Please select cylinders to update status.")
             return
 
-        # Status selection dialog
-        status_dialog = tk.Toplevel(self)
-        status_dialog.title("Update Cylinder Status")
-        status_dialog.geometry("300x150")
-        status_dialog.resizable(False, False)
-        status_dialog.transient(self)
-        status_dialog.grab_set()
+        # Filter to cylinders with 'refill' or 'returned' status
+        valid_ids = []
+        for cid in selected_ids:
+            for row in self.cylinders:
+                if row[0] == cid:
+                    cylinder = Cylinder.from_db_row(row)
+                    if cylinder.status in ['refill', 'returned']:
+                        valid_ids.append(cid)
+                    break
 
-        ttk.Label(status_dialog, text=f"Update status for {len(selected_ids)} cylinders:").pack(pady=10)
-        status_var = tk.StringVar()
-        status_combo = ttk.Combobox(status_dialog, textvariable=status_var,
-                                    values=self.status_options, state="readonly")
-        status_combo.pack(pady=5)
+        if not valid_ids:
+            messagebox.showerror("Error", "Only cylinders with 'refill' or 'returned' status can be updated.")
+            return
 
-        def save_status():
-            new_status = status_var.get()
-            if not new_status:
-                messagebox.showerror("Error", "Please select a status.")
-                return
+        # Show status selection dialog
+        dialog = StatusUpdateDialog(self, len(valid_ids))
+        if not dialog.result:
+            return
 
-            try:
-                updated_count = 0
-                for cid in selected_ids:
-                    # Find cylinder data
-                    for row in self.cylinders:
-                        if row[0] == cid:
-                            cylinder = Cylinder.from_db_row(row)
-                            update_cylinder(cid, cylinder.cylinder_type, new_status, cylinder.location)
-                            updated_count += 1
-                            break
-                self.load_cylinders()
-                messagebox.showinfo("Success", f"Status updated for {updated_count} cylinders.")
-                status_dialog.destroy()
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to update status: {e}")
+        new_status = dialog.result
 
-        ttk.Button(status_dialog, text="Update", command=save_status).pack(pady=10)
+        # Confirm update
+        if not messagebox.askyesno("Confirm Update", f"Update status to '{new_status}' for {len(valid_ids)} selected cylinders?"):
+            return
+
+        try:
+            updated_count = 0
+            for cid in valid_ids:
+                # Find cylinder data
+                for row in self.cylinders:
+                    if row[0] == cid:
+                        cylinder = Cylinder.from_db_row(row)
+                        update_cylinder(cid, cylinder.cylinder_type, new_status, cylinder.location)
+                        updated_count += 1
+                        break
+            self.load_cylinders()
+            messagebox.showinfo("Success", f"Status updated to '{new_status}' for {updated_count} cylinders.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to update status: {e}")
 
     def select_cylinder(self):
         """Select a cylinder from list."""
@@ -327,20 +371,32 @@ class InventoryManagementFrame(ttk.Frame):
 
         total_cylinders = len(get_all_cylinders())
 
+        # Count cylinders by product
+        product_counts = {}
+        for row in get_all_cylinders():
+            cylinder = Cylinder.from_db_row(row)
+            product = cylinder.cylinder_type
+            product_counts[product] = product_counts.get(product, 0) + 1
+
         # Create report dialog
         report_dialog = tk.Toplevel(self)
         report_dialog.title("Inventory Report")
-        report_dialog.geometry("400x300")
+        report_dialog.geometry("400x400")  # Increased height for more content
         report_dialog.resizable(False, False)
 
         ttk.Label(report_dialog, text="Cylinder Inventory Report", font=("Arial", 14, "bold")).pack(pady=10)
 
-        report_text = tk.Text(report_dialog, wrap=tk.WORD, height=15)
+        report_text = tk.Text(report_dialog, wrap=tk.WORD, height=20)  # Increased height
         report_text.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
 
         report_content = f"Total Cylinders: {total_cylinders}\n\n"
+        report_content += "Status Counts:\n"
         for status, count in status_counts.items():
             report_content += f"{status.capitalize()}: {count}\n"
+
+        report_content += f"\nProduct Counts:\n"
+        for product, count in sorted(product_counts.items()):
+            report_content += f"{product}: {count}\n"
 
         report_text.insert(tk.END, report_content)
         report_text.config(state=tk.DISABLED)
@@ -352,6 +408,7 @@ class CylinderDialog:
     def __init__(self, parent, title, cylinder=None):
         self.result = None
         self.status_options = ['available', 'dispatched', 'returned', 'refill', 'maintenance']
+        self.product_options = ['Oxygen', 'Nitrogen', 'Argon', 'Hydrogen', 'Carbon dioxide', 'Zero air', 'Helium', 'Dissolved Acetylene', 'Liquid nitrogen', 'Nitrous oxide', 'Mixtures', 'Medical Oxygen']
         self.dialog = tk.Toplevel(parent)
         self.dialog.title(title)
         self.dialog.geometry("400x300")
@@ -369,9 +426,11 @@ class CylinderDialog:
         self.cylinder_id_entry = ttk.Entry(self.dialog, width=30)
         self.cylinder_id_entry.grid(row=0, column=1, padx=10, pady=5)
 
-        ttk.Label(self.dialog, text="Type:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
-        self.type_entry = ttk.Entry(self.dialog, width=30)
-        self.type_entry.grid(row=1, column=1, padx=10, pady=5)
+        ttk.Label(self.dialog, text="Product:").grid(row=1, column=0, padx=10, pady=5, sticky="w")
+        self.product_var = tk.StringVar()
+        self.product_combo = ttk.Combobox(self.dialog, textvariable=self.product_var,
+                                          values=self.product_options, state="readonly", width=27)
+        self.product_combo.grid(row=1, column=1, padx=10, pady=5)
 
         ttk.Label(self.dialog, text="Status:").grid(row=2, column=0, padx=10, pady=5, sticky="w")
         self.status_var = tk.StringVar()
@@ -394,14 +453,14 @@ class CylinderDialog:
         if cylinder:
             self.cylinder_id_entry.insert(0, cylinder.cylinder_id)
             self.cylinder_id_entry.config(state="disabled")  # Don't allow editing cylinder ID
-            self.type_entry.insert(0, cylinder.cylinder_type)
+            self.product_var.set(cylinder.cylinder_type)
             self.status_var.set(cylinder.status)
             self.location_entry.insert(0, cylinder.location)
 
     def save(self):
         """Save cylinder data."""
         cylinder_id = self.cylinder_id_entry.get().strip()
-        cylinder_type = self.type_entry.get().strip()
+        cylinder_type = self.product_var.get().strip()
         status = self.status_var.get()
         location = self.location_entry.get().strip()
 
@@ -410,6 +469,50 @@ class CylinderDialog:
 
         self.result = (cylinder_id, cylinder_type, status, location)
         self.dialog.destroy()
+
+    def cancel(self):
+        """Cancel dialog."""
+        self.dialog.destroy()
+
+
+class StatusUpdateDialog:
+    """Dialog for selecting new status for cylinders."""
+    def __init__(self, parent, cylinder_count):
+        self.result = None
+        self.status_options = ['refill', 'available']
+        self.dialog = tk.Toplevel(parent)
+        self.dialog.title("Update Cylinder Status")
+        self.dialog.geometry("300x150")
+        self.dialog.resizable(False, False)
+        self.dialog.transient(parent)
+        self.dialog.grab_set()
+
+        self.create_widgets(cylinder_count)
+        self.dialog.wait_window()
+
+    def create_widgets(self, cylinder_count):
+        """Create dialog widgets."""
+        ttk.Label(self.dialog, text=f"Update status for {cylinder_count} cylinder(s):").pack(pady=10)
+
+        self.status_var = tk.StringVar()
+        self.status_combo = ttk.Combobox(self.dialog, textvariable=self.status_var,
+                                        values=self.status_options, state="readonly", width=20)
+        self.status_combo.pack(pady=5)
+        self.status_combo.set('available')  # Default selection
+
+        # Buttons
+        button_frame = ttk.Frame(self.dialog)
+        button_frame.pack(pady=20)
+
+        ttk.Button(button_frame, text="Update", command=self.update).pack(side=tk.LEFT, padx=10)
+        ttk.Button(button_frame, text="Cancel", command=self.cancel).pack(side=tk.LEFT, padx=10)
+
+    def update(self):
+        """Set the selected status."""
+        status = self.status_var.get()
+        if status:
+            self.result = status
+            self.dialog.destroy()
 
     def cancel(self):
         """Cancel dialog."""

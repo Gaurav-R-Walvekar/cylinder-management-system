@@ -311,8 +311,8 @@ def return_cylinders(dc_number, cylinder_ids, return_date, return_notes):
                 SET return_date = ?, return_notes = ?, status = 'returned'
                 WHERE id = ?
             ''', (return_date, return_notes, dispatch_id))
-            # Update cylinder status to refill (needs to be refilled before available)
-            cursor.execute("UPDATE cylinders SET status = 'refill' WHERE id = ?", (cylinder_id,))
+            # Update cylinder status to returned
+            cursor.execute("UPDATE cylinders SET status = 'returned' WHERE id = ?", (cylinder_id,))
         conn.commit()
     finally:
         conn.close()

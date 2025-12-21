@@ -6,6 +6,7 @@ Dispatch Tracking Frame for Cylinder Management System
 import tkinter as tk
 from tkinter import ttk, messagebox, filedialog
 from datetime import datetime
+import os
 from database import dispatch_cylinders, return_cylinders, get_all_dispatches, get_all_customers, get_cylinders_by_status, get_dispatched_cylinders_by_dc, generate_dc_number, get_connection
 from models.dispatch import Dispatch
 from models.customer import Customer
@@ -14,6 +15,16 @@ try:
 except ImportError:
     messagebox.showerror("Missing Library", "openpyxl is required for Excel export. Please install it with: pip install openpyxl")
     Workbook = None
+
+try:
+    from reportlab.lib.pagesizes import letter
+    from reportlab.pdfgen import canvas
+    from reportlab.lib import colors
+    from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, Spacer
+    from reportlab.lib.styles import getSampleStyleSheet
+except ImportError:
+    messagebox.showerror("Missing Library", "reportlab is required for PDF generation. Please install it with: pip install reportlab")
+    SimpleDocTemplate = None
 
 class DispatchTrackingFrame(ttk.Frame):
     def __init__(self, parent):
@@ -83,7 +94,6 @@ class DispatchTrackingFrame(ttk.Frame):
         self.manual_cylinder_entry = tk.Entry(dispatch_frame, width=27)
         self.manual_cylinder_entry.grid(row=3, column=1, padx=5, pady=2)
         self.manual_cylinder_entry.bind('<Return>', lambda e: self.update_selected_cylinders())
-        self.manual_cylinder_entry.bind('<FocusOut>', lambda e: self.update_selected_cylinders())
         tk.Label(dispatch_frame, text="(Comma-separated IDs)").grid(row=3, column=2, padx=5, pady=2, sticky="w")
 
         tk.Label(dispatch_frame, text="Selected Cylinders:").grid(row=4, column=0, padx=5, pady=5, sticky="w")
@@ -146,7 +156,7 @@ class DispatchTrackingFrame(ttk.Frame):
 
         tk.Label(filter_frame, text="Filter by Status:").pack(side=tk.LEFT, padx=5)
 
-        self.filter_var = tk.StringVar(value="All")
+        self.filter_var = tk.StringVar(value="dispatched")
         filter_combo = ttk.Combobox(filter_frame, textvariable=self.filter_var,
                                     values=["All", "dispatched", "returned", "refill", "maintenance"],
                                     state="readonly", width=15)
@@ -256,100 +266,204 @@ class DispatchTrackingFrame(ttk.Frame):
         self.on_filter_change()
 
     def generate_bill(self):
-        """Generate a bill for the selected company and DC."""
+        """Generate a bill for the selected DC or company."""
         company_selection = self.company_filter_var.get()
         dc_selection = self.dc_filter_var.get()
 
-        if company_selection == "All":
-            messagebox.showerror("Error", "Please select a specific company to generate bill.")
+        if dc_selection != "All":
+            # Generate bill for specific DC
+            bill_data = self.get_bill_data_for_dc(dc_selection)
+            if not bill_data:
+                messagebox.showinfo("No Data", f"No dispatches found for DC {dc_selection}.")
+                return
+            customer_name = bill_data['customer_name']
+            bill_title = f"Bill for DC {dc_selection} - {customer_name}"
+        elif company_selection != "All":
+            # Generate bill for specific company
+            customer_id = int(company_selection.split(' - ')[0])
+            customer_name = company_selection.split(' - ')[1]
+            bill_data = self.get_bill_data_for_company(customer_id)
+            if not bill_data:
+                messagebox.showinfo("No Data", f"No dispatches found for {customer_name}.")
+                return
+            bill_title = f"Bill for {customer_name}"
+        else:
+            messagebox.showerror("Error", "Please select a specific DC or company to generate bill.")
             return
 
-        customer_id = int(company_selection.split(' - ')[0])
-        customer_name = company_selection.split(' - ')[1]
+        # Generate PDF bill
+        self.create_pdf_bill(bill_title, bill_data)
 
-        # Get dispatches for this customer, optionally filtered by DC
+    def get_bill_data_for_dc(self, dc_number):
+        """Get bill data for a specific DC number."""
         conn = get_connection()
         cursor = conn.cursor()
-        if dc_selection == "All":
-            cursor.execute('''
-                SELECT d.dc_number, d.dispatch_date, d.return_date, d.status, cy.cylinder_id, cy.cylinder_type, d.dispatch_notes
-                FROM dispatches d
-                JOIN cylinders cy ON d.cylinder_id = cy.id
-                WHERE d.customer_id = ?
-                ORDER BY d.dispatch_date DESC
-            ''', (customer_id,))
-        else:
-            cursor.execute('''
-                SELECT d.dc_number, d.dispatch_date, d.return_date, d.status, cy.cylinder_id, cy.cylinder_type, d.dispatch_notes
-                FROM dispatches d
-                JOIN cylinders cy ON d.cylinder_id = cy.id
-                WHERE d.customer_id = ? AND d.dc_number = ?
-                ORDER BY d.dispatch_date DESC
-            ''', (customer_id, dc_selection))
+        # Get customer info from dispatches
+        cursor.execute('''
+            SELECT DISTINCT c.id, c.name, c.contact_info, c.address
+            FROM dispatches d
+            JOIN customers c ON d.customer_id = c.id
+            WHERE d.dc_number = ?
+        ''', (dc_number,))
+        customer_row = cursor.fetchone()
+        if not customer_row:
+            conn.close()
+            return None
+        customer_id, customer_name, contact_info, address = customer_row
+
+        # Get dispatches
+        cursor.execute('''
+            SELECT d.dc_number, d.dispatch_date, d.return_date, d.status, cy.cylinder_id, cy.cylinder_type, d.grade, d.dispatch_notes, d.return_notes
+            FROM dispatches d
+            JOIN cylinders cy ON d.cylinder_id = cy.id
+            WHERE d.dc_number = ?
+            ORDER BY d.dispatch_date DESC
+        ''', (dc_number,))
         dispatches = cursor.fetchall()
         conn.close()
 
-        if not dispatches:
-            messagebox.showinfo("No Data", f"No dispatches found for {customer_name}.")
+        return {
+            'customer_id': customer_id,
+            'customer_name': customer_name,
+            'contact_info': contact_info,
+            'address': address,
+            'dispatches': dispatches
+        }
+
+    def create_pdf_bill(self, bill_title, bill_data):
+        """Create a professional PDF bill."""
+        if SimpleDocTemplate is None:
+            messagebox.showerror("Error", "reportlab is not installed. Cannot generate PDF.")
             return
 
-        # Generate bill text
-        bill_title = f"Bill for {customer_name}"
-        if dc_selection != "All":
-            bill_title += f" - DC {dc_selection}"
-        bill_text = f"{bill_title}\n"
-        bill_text += "=" * 50 + "\n\n"
-        bill_text += f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}\n\n"
+        # Default filename
+        customer_name_clean = bill_data['customer_name'].replace(' ', '_')
+        default_name = f"{customer_name_clean}_Bill_{datetime.now().strftime('%Y-%m-%d')}.pdf"
 
-        total_cylinders = 0
-        dispatched_count = 0
-        returned_count = 0
+        file_path = filedialog.asksaveasfilename(
+            defaultextension=".pdf",
+            filetypes=[("PDF files", "*.pdf"), ("All files", "*.*")],
+            title="Save Bill as PDF",
+            initialfile=default_name
+        )
+        if not file_path:
+            return
 
-        for dc, disp_date, ret_date, status, cyl_id, cyl_type, notes in dispatches:
-            bill_text += f"DC Number: {dc}\n"
-            bill_text += f"Cylinder: {cyl_id} ({cyl_type})\n"
-            bill_text += f"Dispatch Date: {disp_date}\n"
-            if ret_date:
-                bill_text += f"Return Date: {ret_date}\n"
-            bill_text += f"Status: {status}\n"
-            if notes:
-                bill_text += f"Notes: {notes}\n"
-            bill_text += "-" * 30 + "\n"
+        try:
+            doc = SimpleDocTemplate(file_path, pagesize=letter)
+            styles = getSampleStyleSheet()
+            story = []
 
-            total_cylinders += 1
-            if status == 'dispatched':
-                dispatched_count += 1
-            elif status == 'returned':
-                returned_count += 1
+            # Title
+            title_style = styles['Heading1']
+            title_style.alignment = 1  # Center
+            story.append(Paragraph(bill_title, title_style))
+            story.append(Spacer(1, 12))
 
-        bill_text += f"\nSummary:\n"
-        bill_text += f"Total Cylinders: {total_cylinders}\n"
-        bill_text += f"Currently Dispatched: {dispatched_count}\n"
-        bill_text += f"Returned: {returned_count}\n"
+            # Company Header
+            company_info = f"<b>Customer:</b> {bill_data['customer_name']}<br/>"
+            if bill_data['contact_info']:
+                company_info += f"<b>Contact:</b> {bill_data['contact_info']}<br/>"
+            if bill_data['address']:
+                company_info += f"<b>Address:</b> {bill_data['address']}<br/>"
+            story.append(Paragraph(company_info, styles['Normal']))
+            story.append(Spacer(1, 12))
 
-        # Show bill in a new window
-        bill_window = tk.Toplevel(self)
-        bill_window.title(bill_title)
-        bill_window.geometry("600x400")
+            # Generated on
+            story.append(Paragraph(f"Generated on: {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}", styles['Normal']))
+            story.append(Spacer(1, 12))
 
-        text_widget = tk.Text(bill_window, wrap=tk.WORD)
-        text_widget.insert(tk.END, bill_text)
-        text_widget.config(state=tk.DISABLED)
-        text_widget.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+            # Table data
+            data = [['DC Number', 'Cylinder ID', 'Type', 'Grade', 'Dispatch Date', 'Return Date', 'Status']]
+            total_cylinders = 0
+            dispatched_count = 0
+            returned_count = 0
 
-        # Save button
-        def save_bill():
-            file_path = filedialog.asksaveasfilename(
-                defaultextension=".txt",
-                filetypes=[("Text files", "*.txt"), ("All files", "*.*")],
-                title="Save Bill"
-            )
-            if file_path:
-                with open(file_path, 'w') as f:
-                    f.write(bill_text)
-                messagebox.showinfo("Success", f"Bill saved to {file_path}")
+            for dc, disp_date, ret_date, status, cyl_id, cyl_type, grade, disp_notes, ret_notes in bill_data['dispatches']:
+                data.append([dc, cyl_id, cyl_type, grade or '', disp_date, ret_date or '', status])
+                total_cylinders += 1
+                if status == 'dispatched':
+                    dispatched_count += 1
+                elif status == 'returned':
+                    returned_count += 1
 
-        tk.Button(bill_window, text="Save Bill", command=save_bill).pack(pady=5)
+            # Create table
+            table = Table(data)
+            table.setStyle(TableStyle([
+                ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
+                ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
+                ('ALIGN', (0, 0), (-1, -1), 'CENTER'),
+                ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
+                ('FONTSIZE', (0, 0), (-1, 0), 12),
+                ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
+                ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
+                ('GRID', (0, 0), (-1, -1), 1, colors.black)
+            ]))
+            story.append(table)
+            story.append(Spacer(1, 12))
+
+            # Summary
+            summary = f"""
+            <b>Summary:</b><br/>
+            Total Cylinders: {total_cylinders}<br/>
+            Currently Dispatched: {dispatched_count}<br/>
+            Returned: {returned_count}
+            """
+            story.append(Paragraph(summary, styles['Normal']))
+
+            # Build PDF
+            doc.build(story)
+
+            messagebox.showinfo("Success", f"Bill saved to {file_path}")
+
+            # Ask to print
+            if messagebox.askyesno("Print Bill", "Do you want to print the bill?"):
+                self.print_pdf(file_path)
+
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to generate PDF: {e}")
+
+    def print_pdf(self, file_path):
+        """Print the PDF file."""
+        try:
+            if os.name == 'nt':  # Windows
+                os.startfile(file_path, "print")
+            else:
+                # For other OS, use system print command
+                os.system(f"lpr {file_path}")
+        except Exception as e:
+            messagebox.showerror("Print Error", f"Failed to print: {e}")
+
+    def get_bill_data_for_company(self, customer_id):
+        """Get bill data for a specific company."""
+        conn = get_connection()
+        cursor = conn.cursor()
+        # Get customer info
+        cursor.execute('SELECT name, contact_info, address FROM customers WHERE id = ?', (customer_id,))
+        customer_row = cursor.fetchone()
+        if not customer_row:
+            conn.close()
+            return None
+        customer_name, contact_info, address = customer_row
+
+        # Get dispatches
+        cursor.execute('''
+            SELECT d.dc_number, d.dispatch_date, d.return_date, d.status, cy.cylinder_id, cy.cylinder_type, d.grade, d.dispatch_notes, d.return_notes
+            FROM dispatches d
+            JOIN cylinders cy ON d.cylinder_id = cy.id
+            WHERE d.customer_id = ?
+            ORDER BY d.dc_number DESC, d.dispatch_date DESC
+        ''', (customer_id,))
+        dispatches = cursor.fetchall()
+        conn.close()
+
+        return {
+            'customer_id': customer_id,
+            'customer_name': customer_name,
+            'contact_info': contact_info,
+            'address': address,
+            'dispatches': dispatches
+        }
 
     def export_to_excel(self):
         """Export the current dispatch history to Excel."""
