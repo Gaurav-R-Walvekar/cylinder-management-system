@@ -32,10 +32,13 @@ class DispatchTrackingFrame(ttk.Frame):
         self.dispatches = []
         self.customers = []
         self.available_cylinders = []
+        self.selected_items = set()  # For checkbox selection
+        self.cyl_history_selected = set()  # For available cylinders history selection
         self.load_customers()
         self.load_available_cylinders()
         self.create_widgets()
         self.load_dispatches()
+        self.load_available_cylinders_history()
 
     def generate_dc_number(self):
         """Generate a unique DC number."""
@@ -43,118 +46,141 @@ class DispatchTrackingFrame(ttk.Frame):
 
     def create_widgets(self):
         """Create dispatch tracking widgets."""
-        # Title
-        title_label = tk.Label(self, text="Dispatch & Return Tracking",
-                              font=("Arial", 14, "bold"), fg='#2c3e50', bg='#f8f8f8')
-        title_label.pack(pady=10)
 
-        # Main container
-        main_frame = ttk.Frame(self)
-        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # Main container with tabs
+        self.notebook = ttk.Notebook(self)
+        self.notebook.pack(fill=tk.BOTH, expand=True, padx=10, pady=(5, 10))
 
-        # Left panel - Dispatch/Return operations
-        left_panel = ttk.LabelFrame(main_frame, text="Operations", width=400)
-        left_panel.pack(side=tk.LEFT, fill=tk.Y, padx=5, pady=5)
+        # Tab 1: Operations (Dispatch/Return)
+        operations_tab = ttk.Frame(self.notebook)
+        self.notebook.add(operations_tab, text="Operations")
+
+        # Left panel - Dispatch/Return operations with scroll
+        left_panel = ttk.LabelFrame(operations_tab, text="Operations")
+        left_panel.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=(5, 2), pady=5)
+        
+        # Canvas and scrollbar for scrollable operations section
+        canvas = tk.Canvas(left_panel)
+        scrollbar = ttk.Scrollbar(left_panel, orient="vertical", command=canvas.yview)
+        scrollable_frame = ttk.Frame(canvas)
+        
+        scrollable_frame.bind(
+            "<Configure>",
+            lambda e: canvas.configure(scrollregion=canvas.bbox("all"))
+        )
+        
+        canvas.create_window((0, 0), window=scrollable_frame, anchor="nw")
+        canvas.configure(yscrollcommand=scrollbar.set)
+        
+        canvas.pack(side="left", fill="both", expand=True)
+        scrollbar.pack(side="right", fill="y")
 
         # Dispatch section
-        dispatch_frame = tk.LabelFrame(left_panel, text="Dispatch Cylinders",
-                                      font=("Arial", 10))
+        dispatch_frame = ttk.LabelFrame(scrollable_frame, text="Dispatch Cylinders", padding=5)
         dispatch_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        tk.Label(dispatch_frame, text="Customer:").grid(row=0, column=0, padx=5, pady=2, sticky="w")
+        # Grid layout for dispatch form
+        tk.Label(dispatch_frame, text="Customer:").grid(row=0, column=0, padx=5, pady=3, sticky="w")
         self.customer_var = tk.StringVar()
         self.customer_combo = ttk.Combobox(dispatch_frame, textvariable=self.customer_var,
-                                          values=[f"{c[0]} - {c[1]}" for c in self.customers],
-                                          state="readonly", width=25)
-        self.customer_combo.grid(row=0, column=1, padx=5, pady=2)
+                                           values=[f"{c[0]} - {c[1]}" for c in self.customers],
+                                           state="readonly", width=28)
+        self.customer_combo.grid(row=0, column=1, padx=5, pady=3, sticky="ew")
 
-        tk.Label(dispatch_frame, text="DC Number:").grid(row=1, column=0, padx=5, pady=2, sticky="w")
+        tk.Label(dispatch_frame, text="Dispatch Date:").grid(row=1, column=0, padx=5, pady=3, sticky="w")
+        self.dispatch_date_entry = tk.Entry(dispatch_frame, width=30)
+        self.dispatch_date_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
+        self.dispatch_date_entry.grid(row=1, column=1, padx=5, pady=3, sticky="ew")
+
+        tk.Label(dispatch_frame, text="DC Number:").grid(row=2, column=0, padx=5, pady=3, sticky="w")
         self.dc_number_var = tk.StringVar()
-        self.dc_number_entry = tk.Entry(dispatch_frame, textvariable=self.dc_number_var, width=27)
-        # Generate initial DC number
-        self.dc_number_var.set(self.generate_dc_number())
-        self.dc_number_entry.grid(row=1, column=1, padx=5, pady=2)
+        self.dc_number_entry = tk.Entry(dispatch_frame, textvariable=self.dc_number_var, width=30)
+        self.dc_number_entry.grid(row=2, column=1, padx=5, pady=3, sticky="ew")
+        # Auto-fill with next available DC number
+        self.dc_number_entry.insert(0, self.generate_dc_number())
 
-        tk.Label(dispatch_frame, text="Available Cylinders:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
+        tk.Label(dispatch_frame, text="Grade:*").grid(row=3, column=0, padx=5, pady=3, sticky="w")
+        self.grade_entry = tk.Entry(dispatch_frame, width=30)
+        self.grade_entry.grid(row=3, column=1, padx=5, pady=3, sticky="ew")
+
+        tk.Label(dispatch_frame, text="Available Cylinders:").grid(row=4, column=0, padx=5, pady=3, sticky="nw")
         # Frame for listbox and scrollbar
         cylinder_frame = tk.Frame(dispatch_frame)
-        cylinder_frame.grid(row=2, column=1, padx=5, pady=5)
+        cylinder_frame.grid(row=4, column=1, padx=5, pady=3, sticky="ew")
         # Listbox for multiple cylinder selection
-        self.cylinder_listbox = tk.Listbox(cylinder_frame, selectmode=tk.MULTIPLE, height=4, width=30)
-        self.cylinder_listbox.pack(side=tk.LEFT)
+        self.cylinder_listbox = tk.Listbox(cylinder_frame, selectmode=tk.MULTIPLE, height=4, width=32)
+        self.cylinder_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         cylinder_scrollbar = tk.Scrollbar(cylinder_frame, orient=tk.VERTICAL, command=self.cylinder_listbox.yview)
         self.cylinder_listbox.config(yscrollcommand=cylinder_scrollbar.set)
         cylinder_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        self.cylinder_listbox.bind('<<ListboxSelect>>', lambda e: self.update_selected_cylinders())
+        self.cylinder_listbox.bind('<<ListboxSelect>>', lambda e: self.on_available_cylinder_select())
+        self.cylinder_listbox.bind('<<ListboxUnselect>>', lambda e: self.on_available_cylinder_deselect())
         # Populate listbox
         for cylinder in self.available_cylinders:
             self.cylinder_listbox.insert(tk.END, f"{cylinder[0]} - {cylinder[1]} ({cylinder[2]})")
 
-        tk.Label(dispatch_frame, text="Manual Cylinder IDs:").grid(row=3, column=0, padx=5, pady=2, sticky="w")
-        self.manual_cylinder_entry = tk.Entry(dispatch_frame, width=27)
-        self.manual_cylinder_entry.grid(row=3, column=1, padx=5, pady=2)
+        tk.Label(dispatch_frame, text="Manual Cylinder IDs:").grid(row=5, column=0, padx=5, pady=3, sticky="w")
+        self.manual_cylinder_entry = tk.Entry(dispatch_frame, width=30)
+        self.manual_cylinder_entry.grid(row=5, column=1, padx=5, pady=3, sticky="ew")
         self.manual_cylinder_entry.bind('<Return>', lambda e: self.update_selected_cylinders())
-        tk.Label(dispatch_frame, text="(Comma-separated IDs)").grid(row=3, column=2, padx=5, pady=2, sticky="w")
+        tk.Label(dispatch_frame, text="(Comma-separated IDs)", font=("Arial", 8)).grid(row=6, column=1, padx=5, pady=0, sticky="w")
 
-        tk.Label(dispatch_frame, text="Selected Cylinders:").grid(row=4, column=0, padx=5, pady=5, sticky="w")
+        tk.Label(dispatch_frame, text="Selected Cylinders:").grid(row=7, column=0, padx=5, pady=3, sticky="nw")
         # Frame for listbox and scrollbar
         selected_frame = tk.Frame(dispatch_frame)
-        selected_frame.grid(row=4, column=1, padx=5, pady=5)
-        self.selected_cylinders_listbox = tk.Listbox(selected_frame, height=3, width=30)
-        self.selected_cylinders_listbox.pack(side=tk.LEFT)
+        selected_frame.grid(row=7, column=1, padx=5, pady=3, sticky="ew")
+        self.selected_cylinders_listbox = tk.Listbox(selected_frame, height=3, width=32)
+        self.selected_cylinders_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         selected_scrollbar = tk.Scrollbar(selected_frame, orient=tk.VERTICAL, command=self.selected_cylinders_listbox.yview)
         self.selected_cylinders_listbox.config(yscrollcommand=selected_scrollbar.set)
         selected_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        tk.Button(dispatch_frame, text="Update Selected", command=self.update_selected_cylinders).grid(row=4, column=2, padx=5, pady=5)
+        self.selected_cylinders_listbox.bind('<Double-1>', self.remove_selected_cylinder)
 
-        tk.Label(dispatch_frame, text="Dispatch Date:").grid(row=5, column=0, padx=5, pady=5, sticky="w")
-        self.dispatch_date_entry = tk.Entry(dispatch_frame, width=27)
-        self.dispatch_date_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
-        self.dispatch_date_entry.grid(row=5, column=1, padx=5, pady=5)
+        # Configure grid weights for dispatch frame
+        dispatch_frame.grid_columnconfigure(1, weight=1)
 
-        tk.Label(dispatch_frame, text="Grade:").grid(row=6, column=0, padx=5, pady=5, sticky="w")
-        self.grade_entry = tk.Entry(dispatch_frame, width=27)
-        self.grade_entry.grid(row=6, column=1, padx=5, pady=5)
-
-        tk.Button(dispatch_frame, text="Dispatch Selected", command=self.dispatch_cylinders).grid(row=7, column=0, columnspan=2, pady=10)
+        ttk.Button(dispatch_frame, text="Dispatch Selected", command=self.dispatch_cylinders).grid(row=8, column=0, columnspan=2, pady=10)
 
         # Return section
-        return_frame = tk.LabelFrame(left_panel, text="Return Cylinders", font=("Arial", 10))
+        return_frame = ttk.LabelFrame(scrollable_frame, text="Return Cylinders", padding=5)
         return_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        tk.Label(return_frame, text="DC Number:").grid(row=0, column=0, padx=5, pady=2, sticky="w")
+        tk.Label(return_frame, text="DC Number:").grid(row=0, column=0, padx=5, pady=3, sticky="w")
         self.dc_var = tk.StringVar()
         self.dc_combo = ttk.Combobox(return_frame, textvariable=self.dc_var,
-                                    values=[], state="readonly", width=25)
-        self.dc_combo.grid(row=0, column=1, padx=5, pady=2)
+                                     values=[], state="readonly", width=28)
+        self.dc_combo.grid(row=0, column=1, padx=5, pady=3, sticky="ew")
         self.dc_combo.bind('<<ComboboxSelected>>', self.on_dc_select)
 
-        tk.Label(return_frame, text="Dispatched Cylinders:").grid(row=1, column=0, padx=5, pady=5, sticky="w")
+        tk.Label(return_frame, text="Dispatched Cylinders:").grid(row=1, column=0, padx=5, pady=3, sticky="nw")
         # Frame for listbox and scrollbar
         return_cylinder_frame = tk.Frame(return_frame)
-        return_cylinder_frame.grid(row=1, column=1, padx=5, pady=5)
-        self.return_cylinder_listbox = tk.Listbox(return_cylinder_frame, selectmode=tk.MULTIPLE, height=4, width=30)
-        self.return_cylinder_listbox.pack(side=tk.LEFT)
+        return_cylinder_frame.grid(row=1, column=1, padx=5, pady=3, sticky="ew")
+        self.return_cylinder_listbox = tk.Listbox(return_cylinder_frame, selectmode=tk.MULTIPLE, height=4, width=32)
+        self.return_cylinder_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         return_scrollbar = tk.Scrollbar(return_cylinder_frame, orient=tk.VERTICAL, command=self.return_cylinder_listbox.yview)
         self.return_cylinder_listbox.config(yscrollcommand=return_scrollbar.set)
         return_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
 
-        tk.Label(return_frame, text="Return Date:").grid(row=2, column=0, padx=5, pady=5, sticky="w")
-        self.return_date_entry = tk.Entry(return_frame, width=27)
+        tk.Label(return_frame, text="Return Date:").grid(row=2, column=0, padx=5, pady=3, sticky="w")
+        self.return_date_entry = tk.Entry(return_frame, width=30)
         self.return_date_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
-        self.return_date_entry.grid(row=2, column=1, padx=5, pady=5)
+        self.return_date_entry.grid(row=2, column=1, padx=5, pady=3, sticky="ew")
 
-        tk.Button(return_frame, text="Return Selected", command=self.return_cylinders).grid(row=3, column=0, columnspan=2, pady=10)
+        # Configure grid weights for return frame
+        return_frame.grid_columnconfigure(1, weight=1)
+
+        ttk.Button(return_frame, text="Return Selected", command=self.return_cylinders).grid(row=3, column=0, columnspan=2, pady=10)
 
         # Right panel - History view
-        right_panel = tk.LabelFrame(main_frame, text="Dispatch History", font=("Arial", 10))
-        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=5, pady=5)
+        right_panel = ttk.LabelFrame(operations_tab, text="Dispatch History", padding=5)
+        right_panel.pack(side=tk.RIGHT, fill=tk.BOTH, expand=True, padx=(2, 5), pady=5)
 
         # Filter controls
-        filter_frame = tk.Frame(right_panel)
+        filter_frame = ttk.Frame(right_panel)
         filter_frame.pack(fill=tk.X, padx=5, pady=5)
 
-        tk.Label(filter_frame, text="Filter by Status:").pack(side=tk.LEFT, padx=5)
+        ttk.Label(filter_frame, text="Filter by Status:").pack(side=tk.LEFT, padx=(0, 5))
 
         self.filter_var = tk.StringVar(value="dispatched")
         filter_combo = ttk.Combobox(filter_frame, textvariable=self.filter_var,
@@ -163,16 +189,16 @@ class DispatchTrackingFrame(ttk.Frame):
         filter_combo.pack(side=tk.LEFT, padx=5)
         filter_combo.bind('<<ComboboxSelected>>', self.on_filter_change)
 
-        tk.Label(filter_frame, text="Filter by Company:").pack(side=tk.LEFT, padx=5)
+        ttk.Label(filter_frame, text="Filter by Company:").pack(side=tk.LEFT, padx=(5, 5))
 
         self.company_filter_var = tk.StringVar(value="All")
         self.company_filter_combo = ttk.Combobox(filter_frame, textvariable=self.company_filter_var,
                                                  values=["All"] + [f"{c[0]} - {c[1]}" for c in self.customers],
-                                                 state="readonly", width=20)
+                                                 state="readonly", width=22)
         self.company_filter_combo.pack(side=tk.LEFT, padx=5)
         self.company_filter_combo.bind('<<ComboboxSelected>>', self.on_filter_change)
 
-        tk.Label(filter_frame, text="Filter by DC:").pack(side=tk.LEFT, padx=5)
+        ttk.Label(filter_frame, text="Filter by DC:").pack(side=tk.LEFT, padx=(5, 5))
 
         self.dc_filter_var = tk.StringVar(value="All")
         self.dc_filter_combo = ttk.Combobox(filter_frame, textvariable=self.dc_filter_var,
@@ -180,46 +206,237 @@ class DispatchTrackingFrame(ttk.Frame):
         self.dc_filter_combo.pack(side=tk.LEFT, padx=5)
         self.dc_filter_combo.bind('<<ComboboxSelected>>', self.on_filter_change)
 
-        tk.Button(filter_frame, text="Generate Bill", command=self.generate_bill).pack(side=tk.RIGHT, padx=5)
-        tk.Button(filter_frame, text="Export to Excel", command=self.export_to_excel).pack(side=tk.RIGHT, padx=5)
-        tk.Button(filter_frame, text="Refresh", command=self.load_dispatches).pack(side=tk.RIGHT, padx=5)
+        # Button frame for right side buttons
+        btn_frame = ttk.Frame(filter_frame)
+        btn_frame.pack(side=tk.RIGHT, padx=5)
+        ttk.Button(btn_frame, text="Return Selected", command=self.return_selected_cylinders).pack(side=tk.RIGHT, padx=2)
+        ttk.Button(btn_frame, text="Generate Bill", command=self.generate_bill).pack(side=tk.RIGHT, padx=2)
+        ttk.Button(btn_frame, text="Export to Excel", command=self.export_to_excel).pack(side=tk.RIGHT, padx=2)
+        ttk.Button(btn_frame, text="Refresh", command=self.load_dispatches).pack(side=tk.RIGHT, padx=2)
+
+        # Treeview container with scrollbars
+        tree_container = ttk.Frame(right_panel)
+        tree_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Treeview for dispatches
-        columns = ('ID', 'DC Number', 'Customer', 'Cylinder ID', 'Cylinder Type', 'Grade', 'Dispatch Date', 'Return Date', 'Status', 'Delete')
-        self.tree = ttk.Treeview(right_panel, columns=columns, show='headings', height=18)
+        columns = ('Select', 'ID', 'DC Number', 'Customer', 'Cylinder ID', 'Cylinder Type', 'Grade', 'Dispatch Date', 'Return Date', 'Status', 'Delete')
+        self.tree = ttk.Treeview(tree_container, columns=columns, show='headings', height=15)
 
         # Style the treeview
         style = ttk.Style()
         style.configure("Treeview", font=('Arial', 9), rowheight=25)
         style.configure("Treeview.Heading", font=('Arial', 9, 'bold'))
+        
+        # Configure colors for selected rows
+        style.map('Treeview', background=[('selected', '#bbdefb')])
+        
+        # Configure tags for selection column
+        self.tree.tag_configure('selected', foreground='#1976D2', font=('Arial', 12, 'bold'))
+        self.tree.tag_configure('unselected', foreground="#000000", font=('Arial', 12))
+        
+        # Configure tags for status-based coloring in dispatch history
+        self.tree.tag_configure('dispatched', foreground='#EF6C00')  # Orange
+        self.tree.tag_configure('returned', foreground='#1565C0')    # Blue
+        self.tree.tag_configure('refill', foreground='#6A1B9A')      # Purple
+        self.tree.tag_configure('maintenance', foreground='#546E7A') # Gray
 
         for col in columns:
             self.tree.heading(col, text=col)
-            if col == 'ID':
+            if col == 'Select':
                 self.tree.column(col, width=50, anchor='center')
+            elif col == 'ID':
+                self.tree.column(col, width=40, anchor='center')
             elif col == 'DC Number':
-                self.tree.column(col, width=80)
+                self.tree.column(col, width=90)
             elif col == 'Cylinder Type':
-                self.tree.column(col, width=100)
+                self.tree.column(col, width=90)
             elif col == 'Grade':
-                self.tree.column(col, width=80)
+                self.tree.column(col, width=70)
             elif col == 'Delete':
-                self.tree.column(col, width=60, anchor='center')
+                self.tree.column(col, width=50, anchor='center')
             else:
-                self.tree.column(col, width=100)
+                self.tree.column(col, width=95)
 
         # Scrollbars
-        v_scrollbar = ttk.Scrollbar(right_panel, orient=tk.VERTICAL, command=self.tree.yview)
-        h_scrollbar = ttk.Scrollbar(right_panel, orient=tk.HORIZONTAL, command=self.tree.xview)
+        v_scrollbar = ttk.Scrollbar(tree_container, orient=tk.VERTICAL, command=self.tree.yview)
+        h_scrollbar = ttk.Scrollbar(tree_container, orient=tk.HORIZONTAL, command=self.tree.xview)
         self.tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
 
-        # Pack treeview and scrollbars
-        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=5, pady=5)
-        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X)
+        # Grid treeview and scrollbars
+        self.tree.grid(row=0, column=0, sticky="nsew")
+        v_scrollbar.grid(row=0, column=1, sticky="ns")
+        h_scrollbar.grid(row=1, column=0, sticky="ew")
+
+        # Configure grid weights
+        tree_container.grid_columnconfigure(0, weight=1)
+        tree_container.grid_rowconfigure(0, weight=1)
 
         # Bind double-click for delete
         self.tree.bind('<Double-1>', self.on_tree_double_click)
+        # Bind click for select
+        self.tree.bind('<Button-1>', self.on_tree_click)
+
+        # Tab 2: Available Cylinders with Dispatch History
+        available_tab = ttk.Frame(self.notebook)
+        self.notebook.add(available_tab, text="Available Cylinders")
+        
+        # Container for available cylinders tab
+        available_container = ttk.LabelFrame(available_tab, text="Available Cylinders with Dispatch History", padding=5)
+        available_container.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Filter controls for available cylinders
+        filter_cyl_frame = ttk.Frame(available_container)
+        filter_cyl_frame.pack(fill=tk.X, padx=5, pady=5)
+        
+        ttk.Label(filter_cyl_frame, text="Filter by Status:").pack(side=tk.LEFT, padx=(0, 5))
+        self.available_filter_var = tk.StringVar(value="available")
+        self.available_filter_combo = ttk.Combobox(filter_cyl_frame, textvariable=self.available_filter_var,
+                                                     values=["All", "available", "dispatched", "returned"],
+                                                     state="readonly", width=15)
+        self.available_filter_combo.pack(side=tk.LEFT, padx=5)
+        self.available_filter_combo.bind('<<ComboboxSelected>>', self.load_available_cylinders_history)
+        
+        ttk.Button(filter_cyl_frame, text="Refresh", command=self.load_available_cylinders_history).pack(side=tk.RIGHT, padx=5)
+        
+        # Treeview container with scrollbars
+        cyl_tree_container = ttk.Frame(available_container)
+        cyl_tree_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
+        
+        # Treeview for available cylinders with history
+        self.cyl_history_tree = ttk.Treeview(cyl_tree_container, columns=('Select', 'Cylinder ID', 'Type', 'Status', 'Current Location', 'Last DC', 'Last Customer', 'Last Dispatch Date', 'Last Return Date', 'Last Grade'), show='headings', height=15)
+        
+        # Style the treeview
+        style = ttk.Style()
+        style.configure("Treeview", font=('Arial', 9), rowheight=25)
+        style.configure("Treeview.Heading", font=('Arial', 9, 'bold'))
+        
+        # Configure colors for selected rows
+        style.map('Treeview', background=[('selected', '#bbdefb')])
+        
+        # Configure tags for selection column
+        self.cyl_history_tree.tag_configure('selected', foreground='#1976D2', font=('Arial', 12, 'bold'))
+        self.cyl_history_tree.tag_configure('unselected', foreground="#000000", font=('Arial', 12))
+        
+        # Configure tags for status-based coloring in available cylinders history
+        self.cyl_history_tree.tag_configure('available', foreground='#2E7D32')  # Green
+        self.cyl_history_tree.tag_configure('dispatched', foreground='#EF6C00')  # Orange
+        self.cyl_history_tree.tag_configure('returned', foreground='#1565C0')    # Blue
+        self.cyl_history_tree.tag_configure('refill', foreground='#6A1B9A')      # Purple
+        self.cyl_history_tree.tag_configure('maintenance', foreground='#546E7A') # Gray
+        
+        for col in self.cyl_history_tree['columns']:
+            self.cyl_history_tree.heading(col, text=col)
+            if col == 'Select':
+                self.cyl_history_tree.column(col, width=50, anchor='center')
+            elif col == 'Cylinder ID':
+                self.cyl_history_tree.column(col, width=100)
+            elif col == 'Type':
+                self.cyl_history_tree.column(col, width=80)
+            elif col == 'Status':
+                self.cyl_history_tree.column(col, width=80)
+            elif col == 'Current Location':
+                self.cyl_history_tree.column(col, width=100)
+            elif col == 'Last Grade':
+                self.cyl_history_tree.column(col, width=80)
+            else:
+                self.cyl_history_tree.column(col, width=110)
+        
+        # Scrollbars for available cylinders treeview
+        cyl_v_scrollbar = ttk.Scrollbar(cyl_tree_container, orient=tk.VERTICAL, command=self.cyl_history_tree.yview)
+        cyl_h_scrollbar = ttk.Scrollbar(cyl_tree_container, orient=tk.HORIZONTAL, command=self.cyl_history_tree.xview)
+        self.cyl_history_tree.configure(yscrollcommand=cyl_v_scrollbar.set, xscrollcommand=cyl_h_scrollbar.set)
+        
+        # Grid treeview and scrollbars
+        self.cyl_history_tree.grid(row=0, column=0, sticky="nsew")
+        cyl_v_scrollbar.grid(row=0, column=1, sticky="ns")
+        cyl_h_scrollbar.grid(row=1, column=0, sticky="ew")
+        
+        # Configure grid weights
+        cyl_tree_container.grid_columnconfigure(0, weight=1)
+        cyl_tree_container.grid_rowconfigure(0, weight=1)
+        
+        # Bind click for select
+        self.cyl_history_tree.bind('<Button-1>', self.on_cyl_history_click)
+        
+        # Return button for available cylinders tab
+        return_btn_frame = ttk.Frame(available_container)
+        return_btn_frame.pack(fill=tk.X, padx=5, pady=5)
+        ttk.Button(return_btn_frame, text="Return Selected Cylinders", command=self.return_from_cyl_history).pack(side=tk.RIGHT, padx=5)
+        
+        # Configure tags for status-based coloring in available cylinders history
+        self.cyl_history_tree.tag_configure('available', foreground='#2E7D32')  # Green
+        self.cyl_history_tree.tag_configure('dispatched', foreground='#EF6C00')  # Orange
+        self.cyl_history_tree.tag_configure('returned', foreground='#1565C0')    # Blue
+        self.cyl_history_tree.tag_configure('refill', foreground='#6A1B9A')      # Purple
+        self.cyl_history_tree.tag_configure('maintenance', foreground='#546E7A') # Gray
+
+    def load_available_cylinders_history(self, event=None):
+        """Load available cylinders with their dispatch history for reference during dispatch."""
+        # Check if the filter variable exists (may not exist if called before widgets are created)
+        if not hasattr(self, 'available_filter_var'):
+            return
+        
+        filter_status = self.available_filter_var.get()
+        
+        # Clear current items
+        for item in self.cyl_history_tree.get_children():
+            self.cyl_history_tree.delete(item)
+        
+        conn = get_connection()
+        cursor = conn.cursor()
+        
+        # Get all cylinders with their current status
+        if filter_status == "All":
+            cursor.execute("SELECT id, cylinder_id, cylinder_type, status, location FROM cylinders ORDER BY cylinder_id")
+        else:
+            cursor.execute("SELECT id, cylinder_id, cylinder_type, status, location FROM cylinders WHERE status = ? ORDER BY cylinder_id", (filter_status,))
+        
+        cylinders = cursor.fetchall()
+        
+        for cyl_id, cylinder_id_text, cyl_type, status, location in cylinders:
+            # Get last dispatch history for this cylinder
+            cursor.execute('''
+                SELECT d.dc_number, c.name, d.dispatch_date, d.return_date, d.grade
+                FROM dispatches d
+                JOIN customers c ON d.customer_id = c.id
+                WHERE d.cylinder_id = ?
+                ORDER BY d.dispatch_date DESC
+                LIMIT 1
+            ''', (cyl_id,))
+            history = cursor.fetchone()
+            
+            if history:
+                last_dc, last_customer, last_dispatch_date, last_return_date, last_grade = history
+            else:
+                last_dc = "N/A"
+                last_customer = "N/A"
+                last_dispatch_date = "N/A"
+                last_return_date = "N/A"
+                last_grade = "N/A"
+            
+            current_location = location if location else "Warehouse"
+            
+            # Determine if this cylinder is selected
+            cyl_id_str = str(cyl_id)
+            is_selected = cyl_id_str in self.cyl_history_selected
+            
+            # Store tags with status, cylinder ID, and selection state
+            status_tag = status
+            selection_tag = 'selected' if is_selected else 'unselected'
+            self.cyl_history_tree.insert('', tk.END, values=(
+                '✓' if is_selected else '',  # Select column
+                cylinder_id_text,
+                cyl_type,
+                status,
+                current_location,
+                last_dc,
+                last_customer,
+                last_dispatch_date,
+                last_return_date,
+                last_grade or 'N/A'
+            ), tags=(status_tag, cyl_id_str, selection_tag))  # Store status, cyl_id, and selection as tags
+        
+        conn.close()
 
     def load_customers(self):
         """Load customers for dispatch combo."""
@@ -238,6 +455,25 @@ class DispatchTrackingFrame(ttk.Frame):
             self.cylinder_listbox.delete(0, tk.END)
             for cylinder in self.available_cylinders:
                 self.cylinder_listbox.insert(tk.END, f"{cylinder[0]} - {cylinder[1]} ({cylinder[2]})")
+        
+        # Remove any dispatched cylinders from the selected cylinders listbox
+        if hasattr(self, 'selected_cylinders_listbox'):
+            # Get currently selected cylinder IDs from the listbox
+            selected_to_remove = []
+            for i in range(self.selected_cylinders_listbox.size()):
+                cylinder_text = self.selected_cylinders_listbox.get(i)
+                cylinder_id = int(cylinder_text.split(' - ')[0])
+                # Check if this cylinder is still available
+                if not any(c[0] == cylinder_id for c in self.available_cylinders):
+                    selected_to_remove.append(i)
+            
+            # Remove in reverse order to preserve indices
+            for index in reversed(selected_to_remove):
+                self.selected_cylinders_listbox.delete(index)
+        
+        # Also refresh the available cylinders history (only if widgets exist)
+        if hasattr(self, 'cyl_history_tree'):
+            self.load_available_cylinders_history()
 
     def load_dispatches(self):
         """Load dispatches from database."""
@@ -248,9 +484,12 @@ class DispatchTrackingFrame(ttk.Frame):
         for dispatch_row in self.dispatches:
             dispatch = Dispatch.from_db_row(dispatch_row)
             delete_text = 'Delete' if dispatch.status == 'returned' else ''
-            values = (dispatch.id, dispatch.dc_number, dispatch.customer_name, dispatch.cylinder_id_text,
+            is_selected = dispatch.id in self.selected_items
+            select_text = '✓' if is_selected else ''
+            tags = (dispatch.status, 'selected' if is_selected else 'unselected')
+            values = (select_text, dispatch.id, dispatch.dc_number, dispatch.customer_name, dispatch.cylinder_id_text,
                       dispatch.cylinder_type, dispatch.grade or '', dispatch.dispatch_date, dispatch.return_date, dispatch.status, delete_text)
-            self.tree.insert('', tk.END, values=values)
+            self.tree.insert('', tk.END, values=values, tags=tags)
 
         # Update DC combo with unique DC numbers that have dispatched cylinders
         dc_numbers = list(set(d[1] for d in self.dispatches if d[8] == 'dispatched'))
@@ -264,6 +503,10 @@ class DispatchTrackingFrame(ttk.Frame):
 
         # Apply current filters
         self.on_filter_change()
+        
+        # Also refresh the available cylinders history (only if widgets exist)
+        if hasattr(self, 'cyl_history_tree'):
+            self.load_available_cylinders_history()
 
     def generate_bill(self):
         """Generate a bill for the selected DC or company."""
@@ -495,7 +738,7 @@ class DispatchTrackingFrame(ttk.Frame):
             ws.title = "Dispatch History"
 
             # Headers
-            headers = ['ID', 'DC Number', 'Customer', 'Cylinder ID', 'Cylinder Type', 'Grade', 'Dispatch Date', 'Return Date', 'Status', 'Delete']
+            headers = ['Select', 'ID', 'DC Number', 'Customer', 'Cylinder ID', 'Cylinder Type', 'Grade', 'Dispatch Date', 'Return Date', 'Status', 'Delete']
             for col_num, header in enumerate(headers, 1):
                 ws.cell(row=1, column=col_num, value=header)
 
@@ -537,9 +780,12 @@ class DispatchTrackingFrame(ttk.Frame):
         for dispatch_row in filtered_dispatches:
             dispatch = Dispatch.from_db_row(dispatch_row)
             delete_text = 'Delete' if dispatch.status == 'returned' else ''
-            values = (dispatch.id, dispatch.dc_number, dispatch.customer_name, dispatch.cylinder_id_text,
+            is_selected = dispatch.id in self.selected_items
+            select_text = '✓' if is_selected else ''
+            tags = (dispatch.status, 'selected' if is_selected else 'unselected')
+            values = (select_text, dispatch.id, dispatch.dc_number, dispatch.customer_name, dispatch.cylinder_id_text,
                       dispatch.cylinder_type, dispatch.grade or '', dispatch.dispatch_date, dispatch.return_date, dispatch.status, delete_text)
-            self.tree.insert('', tk.END, values=values)
+            self.tree.insert('', tk.END, values=values, tags=tags)
 
     def on_dc_select(self, event=None):
         """Handle DC number selection for return."""
@@ -582,9 +828,58 @@ class DispatchTrackingFrame(ttk.Frame):
         finally:
             conn.close()
 
+    def on_available_cylinder_select(self):
+        """Handle cylinder selection from available listbox - add to selected list."""
+        selected_indices = self.cylinder_listbox.curselection()
+        
+        # Get all currently selected cylinder IDs
+        selected_cylinder_ids = set()
+        for i in range(self.selected_cylinders_listbox.size()):
+            cylinder_text = self.selected_cylinders_listbox.get(i)
+            cylinder_id = int(cylinder_text.split(' - ')[0])
+            selected_cylinder_ids.add(cylinder_id)
+        
+        # Add newly selected cylinders
+        for index in selected_indices:
+            cylinder_text = self.cylinder_listbox.get(index)
+            cylinder_id = int(cylinder_text.split(' - ')[0])
+            selected_cylinder_ids.add(cylinder_id)
+        
+        # Rebuild selected listbox with all selected cylinders
+        self.selected_cylinders_listbox.delete(0, tk.END)
+        if selected_cylinder_ids:
+            conn = get_connection()
+            cursor = conn.cursor()
+            for cylinder_id in sorted(selected_cylinder_ids):
+                cursor.execute("SELECT cylinder_id, cylinder_type FROM cylinders WHERE id = ? AND status = 'available'", (cylinder_id,))
+                result = cursor.fetchone()
+                if result:
+                    self.selected_cylinders_listbox.insert(tk.END, f"{cylinder_id} - {result[0]} ({result[1]})")
+            conn.close()
+
+    def on_available_cylinder_deselect(self):
+        """Handle cylinder deselection from available listbox - remove from selected list."""
+        # Get currently selected indices in available listbox
+        selected_indices = set(self.cylinder_listbox.curselection())
+        
+        # Get all cylinder IDs that are still selected in available listbox
+        still_selected_ids = set()
+        for index in selected_indices:
+            cylinder_text = self.cylinder_listbox.get(index)
+            cylinder_id = int(cylinder_text.split(' - ')[0])
+            still_selected_ids.add(cylinder_id)
+        
+        # Remove deselected cylinders from selected listbox
+        # Go in reverse order to preserve indices while deleting
+        for i in range(self.selected_cylinders_listbox.size() - 1, -1, -1):
+            cylinder_text = self.selected_cylinders_listbox.get(i)
+            cylinder_id = int(cylinder_text.split(' - ')[0])
+            if cylinder_id not in still_selected_ids:
+                self.selected_cylinders_listbox.delete(i)
+
     def update_selected_cylinders(self):
         """Update the selected cylinders listbox with current selections."""
-        self.selected_cylinders_listbox.delete(0, tk.END)
+        #self.selected_cylinders_listbox.delete(0, tk.END)
 
         selected_indices = self.cylinder_listbox.curselection()
         manual_cylinders = self.manual_cylinder_entry.get().strip()
@@ -592,7 +887,7 @@ class DispatchTrackingFrame(ttk.Frame):
         cylinder_ids = set()
         errors = []
 
-        # From listbox (already available)
+        # From listbox
         for index in selected_indices:
             cylinder_text = self.cylinder_listbox.get(index)
             cylinder_id = int(cylinder_text.split(' - ')[0])
@@ -601,46 +896,72 @@ class DispatchTrackingFrame(ttk.Frame):
         # From manual input
         if manual_cylinders:
             manual_ids = [id.strip() for id in manual_cylinders.split(',') if id.strip()]
-            conn = get_connection()
-            cursor = conn.cursor()
             for manual_id in manual_ids:
                 resolved_id = self.resolve_cylinder_id(manual_id)
                 if resolved_id is None:
                     errors.append(f"Invalid cylinder: {manual_id}")
                 else:
-                    cursor.execute("SELECT status, cylinder_id FROM cylinders WHERE id = ?", (resolved_id,))
-                    result = cursor.fetchone()
-                    if result:
-                        status, cyl_id = result
-                        if status == 'available':
-                            cylinder_ids.add(resolved_id)
-                        else:
-                            errors.append(f"Cylinder {cyl_id} (ID: {resolved_id}) is not available (status: {status})")
-                    else:
-                        errors.append(f"Cylinder {manual_id} not found")
-            conn.close()
+                    cylinder_ids.add(resolved_id)
+
+        # Check all cylinder_ids for availability and existence
+        valid_cylinder_ids = set()
+        conn = get_connection()
+        cursor = conn.cursor()
+        for cylinder_id in cylinder_ids:
+            cursor.execute("SELECT status, cylinder_id FROM cylinders WHERE id = ?", (cylinder_id,))
+            result = cursor.fetchone()
+            if result:
+                status, cyl_id = result
+                if status == 'available':
+                    valid_cylinder_ids.add(cylinder_id)
+                else:
+                    errors.append(f"Cylinder {cyl_id} (ID: {cylinder_id}) is not available (status: {status})")
+            else:
+                errors.append(f"Cylinder ID {cylinder_id} not found")
+        conn.close()
 
         # Display errors if any
         if errors:
-            error_msg = "Errors in manual cylinder input:\n" + "\n".join(errors)
+            error_msg = "Errors in cylinder selection:\n" + "\n".join(errors)
             messagebox.showerror("Cylinder Selection Errors", error_msg)
+        else:
+            # Clear manual input field if added successfully
+            if manual_cylinders:
+                self.manual_cylinder_entry.delete(0, tk.END)
 
-        # Display valid cylinders
-        if cylinder_ids:
+        # Display valid cylinders, avoiding duplicates
+        if valid_cylinder_ids:
+            # Get currently displayed cylinder IDs to avoid duplicates
+            existing_cylinder_ids = set()
+            for i in range(self.selected_cylinders_listbox.size()):
+                cylinder_text = self.selected_cylinders_listbox.get(i)
+                cylinder_id = int(cylinder_text.split(' - ')[0])
+                existing_cylinder_ids.add(cylinder_id)
+            
             conn = get_connection()
             cursor = conn.cursor()
-            for cylinder_id in sorted(cylinder_ids):
-                cursor.execute("SELECT cylinder_id, cylinder_type FROM cylinders WHERE id = ?", (cylinder_id,))
-                result = cursor.fetchone()
-                if result:
-                    self.selected_cylinders_listbox.insert(tk.END, f"{cylinder_id} - {result[0]} ({result[1]})")
+            for cylinder_id in sorted(valid_cylinder_ids):
+                if cylinder_id not in existing_cylinder_ids:
+                    cursor.execute("SELECT cylinder_id, cylinder_type FROM cylinders WHERE id = ?", (cylinder_id,))
+                    result = cursor.fetchone()
+                    if result:
+                        self.selected_cylinders_listbox.insert(tk.END, f"{cylinder_id} - {result[0]} ({result[1]})")
             conn.close()
+
+    def remove_selected_cylinder(self, event):
+        """Remove a cylinder from the selected list on double-click."""
+        selection = self.selected_cylinders_listbox.curselection()
+        if selection:
+            index = selection[0]
+            cylinder_text = self.selected_cylinders_listbox.get(index)
+            cylinder_id = int(cylinder_text.split(' - ')[0])
+            cylinder_display = cylinder_text.split(' - ')[1].split(' (')[0]  # Get the cylinder_id_text
+            if messagebox.askyesno("Confirm Removal", f"Do you want to remove cylinder {cylinder_display} from the selected list?"):
+                self.selected_cylinders_listbox.delete(index)
 
     def dispatch_cylinders(self):
         """Dispatch selected cylinders to a customer."""
         customer_selection = self.customer_var.get()
-        selected_indices = self.cylinder_listbox.curselection()
-        manual_cylinders = self.manual_cylinder_entry.get().strip()
         dispatch_date = self.dispatch_date_entry.get().strip()
         grade = self.grade_entry.get().strip()
         dispatch_notes = ""
@@ -649,8 +970,12 @@ class DispatchTrackingFrame(ttk.Frame):
             messagebox.showerror("Error", "Please select a customer.")
             return
 
-        if not selected_indices and not manual_cylinders:
-            messagebox.showerror("Error", "Please select cylinders from the list or enter manual cylinder IDs.")
+        if not grade:
+            messagebox.showerror("Error", "Grade is mandatory. Please enter the grade.")
+            return
+
+        if self.selected_cylinders_listbox.size() == 0:
+            messagebox.showerror("Error", "Please select cylinders to dispatch.")
             return
 
         if not dispatch_date:
@@ -661,24 +986,12 @@ class DispatchTrackingFrame(ttk.Frame):
             # Extract customer ID
             customer_id = int(customer_selection.split(' - ')[0])
 
-            # Extract cylinder IDs from listbox
+            # Extract cylinder IDs from selected cylinders listbox
             cylinder_ids = []
-            for index in selected_indices:
-                cylinder_text = self.cylinder_listbox.get(index)
+            for i in range(self.selected_cylinders_listbox.size()):
+                cylinder_text = self.selected_cylinders_listbox.get(i)
                 cylinder_id = int(cylinder_text.split(' - ')[0])
                 cylinder_ids.append(cylinder_id)
-
-            # Extract cylinder IDs from manual input
-            if manual_cylinders:
-                manual_ids = [id.strip() for id in manual_cylinders.split(',') if id.strip()]
-                for manual_id in manual_ids:
-                    resolved_id = self.resolve_cylinder_id(manual_id)
-                    if resolved_id is None:
-                        raise ValueError(f"Invalid cylinder ID or cylinder_id: {manual_id}")
-                    cylinder_ids.append(resolved_id)
-
-            # Remove duplicates
-            cylinder_ids = list(set(cylinder_ids))
 
             dc_number = self.dc_number_var.get().strip()
             if not dc_number:
@@ -688,14 +1001,33 @@ class DispatchTrackingFrame(ttk.Frame):
             self.load_available_cylinders()
 
             self.customer_var.set('')
-            self.dc_number_var.set(self.generate_dc_number())  # Generate new DC number for next dispatch
+            # Do not clear DC number
             self.manual_cylinder_entry.delete(0, tk.END)
             self.grade_entry.delete(0, tk.END)
+            self.selected_cylinders_listbox.delete(0, tk.END)  # Clear selected cylinders after successful dispatch
             messagebox.showinfo("Success", f"Cylinders dispatched successfully under DC {dc_number}.")
         except ValueError as e:
             messagebox.showerror("Validation Error", str(e))
         except Exception as e:
             messagebox.showerror("Error", f"Failed to dispatch cylinders: {e}")
+
+    def on_tree_click(self, event):
+        """Handle click on treeview for select toggle."""
+        region = self.tree.identify_region(event.x, event.y)
+        if region == 'cell':
+            item = self.tree.identify_row(event.y)
+            if item:
+                values = self.tree.item(item, 'values')
+                dispatch_id = values[1]
+                if dispatch_id in self.selected_items:
+                    self.selected_items.remove(dispatch_id)
+                    self.tree.item(item, tags=(self.tree.item(item, 'tags')[0], 'unselected'))
+                else:
+                    self.selected_items.add(dispatch_id)
+                    self.tree.item(item, tags=(self.tree.item(item, 'tags')[0], 'selected'))
+                # Update display
+                select_text = '✓' if dispatch_id in self.selected_items else ''
+                self.tree.set(item, 'Select', select_text)
 
     def on_tree_double_click(self, event):
         """Handle double-click on treeview for delete action."""
@@ -704,8 +1036,8 @@ class DispatchTrackingFrame(ttk.Frame):
             return
         item = item[0]
         values = self.tree.item(item, 'values')
-        if len(values) > 9 and values[9] == 'Delete':
-            dispatch_id = values[0]
+        if len(values) > 10 and values[10] == 'Delete':
+            dispatch_id = values[1]
             # Confirm delete
             if messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete dispatch record ID {dispatch_id}?"):
                 try:
@@ -715,6 +1047,83 @@ class DispatchTrackingFrame(ttk.Frame):
                     messagebox.showinfo("Success", "Dispatch record deleted successfully.")
                 except Exception as e:
                     messagebox.showerror("Error", f"Failed to delete dispatch record: {e}")
+
+    def on_cyl_history_click(self, event):
+        """Handle click on available cylinders history treeview for select toggle."""
+        region = self.cyl_history_tree.identify_region(event.x, event.y)
+        if region == 'cell':
+            item = self.cyl_history_tree.identify_row(event.y)
+            if item:
+                values = self.cyl_history_tree.item(item, 'values')
+                tags = self.cyl_history_tree.item(item, 'tags')
+                # tags[0] = status, tags[1] = cyl_id, tags[2] = selection state
+                status_tag = tags[0]
+                cyl_id = tags[1]  # cyl_id is at index 1
+                if cyl_id in self.cyl_history_selected:
+                    self.cyl_history_selected.remove(cyl_id)
+                    self.cyl_history_tree.item(item, tags=(status_tag, cyl_id, 'unselected'))
+                else:
+                    self.cyl_history_selected.add(cyl_id)
+                    self.cyl_history_tree.item(item, tags=(status_tag, cyl_id, 'selected'))
+                # Update display
+                select_text = '✓' if cyl_id in self.cyl_history_selected else ''
+                self.cyl_history_tree.set(item, 'Select', select_text)
+
+    def return_from_cyl_history(self):
+        """Return cylinders selected in the Available Cylinders history tab."""
+        if not self.cyl_history_selected:
+            messagebox.showerror("Error", "Please select at least one cylinder to return.")
+            return
+        
+        return_date = datetime.now().strftime("%Y-%m-%d")
+        return_notes = ""
+        
+        try:
+            # Group selected cylinders by DC number
+            dc_groups = {}
+            selected_cylinder_ids = []
+            
+            for cyl_id in self.cyl_history_selected:
+                # Get the last dispatch for this cylinder
+                conn = get_connection()
+                cursor = conn.cursor()
+                cursor.execute('''
+                    SELECT d.dc_number, d.id
+                    FROM dispatches d
+                    WHERE d.cylinder_id = ? AND d.status = 'dispatched'
+                    ORDER BY d.dispatch_date DESC
+                    LIMIT 1
+                ''', (int(cyl_id),))
+                dispatch = cursor.fetchone()
+                conn.close()
+                
+                if dispatch:
+                    dc_number, dispatch_id = dispatch
+                    if dc_number not in dc_groups:
+                        dc_groups[dc_number] = []
+                    dc_groups[dc_number].append(int(cyl_id))
+                    selected_cylinder_ids.append(int(cyl_id))
+                else:
+                    messagebox.showerror("Error", f"Cylinder {cyl_id} is not currently dispatched.")
+                    return
+            
+            # Confirmation dialog
+            cylinder_ids_str = ', '.join(str(cid) for cid in selected_cylinder_ids)
+            if not messagebox.askyesno("Confirm Return", f"Confirm return of cylinders: {cylinder_ids_str}?"):
+                return
+            
+            # Now return for each DC
+            for dc, cyl_ids in dc_groups.items():
+                return_cylinders(dc, cyl_ids, return_date, return_notes)
+            
+            # Clear selection
+            self.cyl_history_selected.clear()
+            self.load_dispatches()
+            self.load_available_cylinders()
+            self.load_available_cylinders_history()
+            messagebox.showinfo("Success", "Selected cylinders returned successfully.")
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to return cylinders: {e}")
 
     def return_cylinders(self):
         """Return selected cylinders."""
@@ -743,6 +1152,11 @@ class DispatchTrackingFrame(ttk.Frame):
                 cylinder_id = int(cylinder_text.split(' - ')[0])
                 cylinder_ids.append(cylinder_id)
 
+            # Confirmation dialog
+            cylinder_ids_str = ', '.join(str(cid) for cid in cylinder_ids)
+            if not messagebox.askyesno("Confirm Return", f"Confirm return of cylinders: {cylinder_ids_str}?"):
+                return
+
             return_cylinders(dc_number, cylinder_ids, return_date, return_notes)
             self.load_dispatches()
             self.load_available_cylinders()
@@ -753,5 +1167,48 @@ class DispatchTrackingFrame(ttk.Frame):
             messagebox.showinfo("Success", "Cylinders returned successfully.")
         except ValueError as e:
             messagebox.showerror("Validation Error", str(e))
+        except Exception as e:
+            messagebox.showerror("Error", f"Failed to return cylinders: {e}")
+
+    def return_selected_cylinders(self):
+        """Return cylinders selected in the treeview."""
+        if not self.selected_items:
+            messagebox.showerror("Error", "Please select at least one cylinder to return.")
+            return
+
+        return_date = datetime.now().strftime("%Y-%m-%d")  # Use current date
+        return_notes = ""
+
+        try:
+            # Group selected items by DC number
+            dc_groups = {}
+            selected_cylinder_ids = []
+            for item in self.tree.get_children():
+                values = self.tree.item(item, 'values')
+                dispatch_id = values[1]
+                if dispatch_id in self.selected_items:
+                    dc_number = values[2]
+                    for d in self.dispatches:
+                        if d[0] == dispatch_id and d[8] == 'dispatched':  # Only process dispatched cylinders
+                            cylinder_id = d[3]  # d.cylinder_id
+                            if dc_number not in dc_groups:
+                                dc_groups[dc_number] = []
+                            dc_groups[dc_number].append(cylinder_id)
+                            selected_cylinder_ids.append(cylinder_id)
+                            break
+
+            # Confirmation dialog
+            cylinder_ids_str = ', '.join(str(cid) for cid in selected_cylinder_ids)
+            if not messagebox.askyesno("Confirm Return", f"Confirm return of cylinders: {cylinder_ids_str}?"):
+                return
+
+            # Now return for each DC
+            for dc, cyl_ids in dc_groups.items():
+                return_cylinders(dc, cyl_ids, return_date, return_notes)
+
+            self.selected_items.clear()
+            self.load_dispatches()
+            self.load_available_cylinders()
+            messagebox.showinfo("Success", "Selected cylinders returned successfully.")
         except Exception as e:
             messagebox.showerror("Error", f"Failed to return cylinders: {e}")

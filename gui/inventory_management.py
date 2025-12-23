@@ -14,7 +14,7 @@ class InventoryManagementFrame(ttk.Frame):
         self.cylinders = []
         self.status_options = ['available', 'dispatched', 'returned', 'refill', 'maintenance']
         self.check_vars = {}
-        self.select_all_var = tk.BooleanVar()
+        self.selected_items = set()  # For tracking selected cylinder IDs
         self.status_notebook = None
         self.create_widgets()
         self.load_cylinders()
@@ -79,117 +79,119 @@ class InventoryManagementFrame(ttk.Frame):
         self.status_notebook.select(0)  # Select All
         self.status_notebook.bind("<<NotebookTabChanged>>", self.on_tab_changed)
 
-        # Custom table with radio buttons
-        self.table_frame = ttk.Frame(self)
-        self.table_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=5)
+        # Treeview for cylinders table
+        columns = ('Select', 'ID', 'Cylinder ID', 'Product', 'Status', 'Location')
+        self.tree = ttk.Treeview(self, columns=columns, show='headings', height=20)
+        
+        # Style the treeview
+        style = ttk.Style()
+        style.configure("Treeview", font=('Arial', 9), rowheight=25)
+        style.configure("Treeview.Heading", font=('Arial', 9, 'bold'))
+        
+        # Configure colors for selected rows
+        style.map('Treeview', background=[('selected', '#bbdefb')])
+        
+        # Configure tag for selection column
+        self.tree.tag_configure('selected', foreground='#1976D2', font=('Arial', 12, 'bold'))
+        self.tree.tag_configure('unselected', foreground="#000000", font=('Arial', 12))
+        
+        for col in columns:
+            self.tree.heading(col, text=col)
+            if col == 'Select':
+                self.tree.column(col, width=60, anchor='center')
+            elif col == 'ID':
+                self.tree.column(col, width=50, anchor='center')
+            elif col == 'Cylinder ID':
+                self.tree.column(col, width=120)
+            elif col == 'Product':
+                self.tree.column(col, width=120)
+            elif col == 'Status':
+                self.tree.column(col, width=100)
+            elif col == 'Location':
+                self.tree.column(col, width=150)
+        
+        # Scrollbars
+        v_scrollbar = ttk.Scrollbar(self, orient=tk.VERTICAL, command=self.tree.yview)
+        h_scrollbar = ttk.Scrollbar(self, orient=tk.HORIZONTAL, command=self.tree.xview)
+        self.tree.configure(yscrollcommand=v_scrollbar.set, xscrollcommand=h_scrollbar.set)
+        
+        # Pack treeview and scrollbars
+        self.tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True, padx=15, pady=5)
+        v_scrollbar.pack(side=tk.RIGHT, fill=tk.Y, padx=(0, 15))
+        h_scrollbar.pack(side=tk.BOTTOM, fill=tk.X, padx=15)
+        
+        # Bind click event for selection toggle
+        self.tree.bind('<Button-1>', self.on_tree_click)
+        
+        # Select All checkbox frame
+        select_frame = tk.Frame(self, bg='#f8f8f8')
+        select_frame.pack(fill=tk.X, padx=15, pady=(0, 5))
+        self.select_all_var = tk.BooleanVar()
+        select_all_cb = tk.Checkbutton(select_frame, text="Select All", variable=self.select_all_var, 
+                                       command=self.toggle_select_all, bg='#f8f8f8', fg='#2c3e50',
+                                       activebackground='#e3f2fd', activeforeground='#1976D2',
+                                       selectcolor='#bbdefb', font=('Arial', 9, 'bold'))
+        select_all_cb.pack(side=tk.LEFT, padx=5)
 
-        # Canvas for scrolling
-        self.canvas = tk.Canvas(self.table_frame, bg='#f8f8f8')
-        self.scrollbar = ttk.Scrollbar(self.table_frame, orient=tk.VERTICAL, command=self.canvas.yview)
-        self.scrollable_frame = ttk.Frame(self.canvas)
-
-        self.scrollable_frame.bind(
-            "<Configure>",
-            lambda e: self.canvas.configure(scrollregion=self.canvas.bbox("all"))
-        )
-
-        self.canvas.create_window((0, 0), window=self.scrollable_frame, anchor="nw")
-        self.canvas.configure(yscrollcommand=self.scrollbar.set)
-
-        self.canvas.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
-
-        # Bind mousewheel
-        self.canvas.bind_all("<MouseWheel>", self._on_mousewheel)
-
-        # Header
-        self.create_table_header()
-
-        # Select all
-        self.create_select_all()
-
-    def _on_mousewheel(self, event):
-        self.canvas.yview_scroll(int(-1*(event.delta/120)), "units")
-
-    def create_select_all(self):
-        """Create select all checkbox."""
-        select_frame = ttk.Frame(self.table_frame)
-        select_frame.pack(before=self.canvas, fill=tk.X)
-        select_all_cb = tk.Checkbutton(select_frame, text="Select All", variable=self.select_all_var, command=self.toggle_select_all)
-        select_all_cb.pack(side=tk.LEFT, padx=10, pady=5)
-
+    def on_tree_click(self, event):
+        """Handle click on treeview for select toggle."""
+        region = self.tree.identify_region(event.x, event.y)
+        if region == 'cell':
+            item = self.tree.identify_row(event.y)
+            if item:
+                cylinder_id = self.tree.item(item, 'values')[1]  # ID is in column 2
+                if cylinder_id in self.selected_items:
+                    self.selected_items.remove(cylinder_id)
+                    self.tree.item(item, tags=('unselected',))
+                else:
+                    self.selected_items.add(cylinder_id)
+                    self.tree.item(item, tags=('selected',))
+                # Update display
+                select_text = '✓' if cylinder_id in self.selected_items else ''
+                self.tree.set(item, 'Select', select_text)
+                    
     def toggle_select_all(self):
         """Toggle select all checkboxes."""
         state = self.select_all_var.get()
-        for var in self.check_vars.values():
-            var.set(state)
-
-    def create_table_header(self):
-        """Create table header."""
-        header_frame = ttk.Frame(self.scrollable_frame)
-        header_frame.pack(fill=tk.X, pady=2)
-
-        ttk.Label(header_frame, text="Select", width=8, font=("Arial", 9, "bold")).grid(row=0, column=0, padx=2)
-        ttk.Label(header_frame, text="ID", width=5, font=("Arial", 9, "bold")).grid(row=0, column=1, padx=2)
-        ttk.Label(header_frame, text="Cylinder ID", width=15, font=("Arial", 9, "bold")).grid(row=0, column=2, padx=2)
-        ttk.Label(header_frame, text="Product", width=15, font=("Arial", 9, "bold")).grid(row=0, column=3, padx=2)
-        ttk.Label(header_frame, text="Status", width=20, font=("Arial", 9, "bold")).grid(row=0, column=4, padx=2)
-        ttk.Label(header_frame, text="Location", width=15, font=("Arial", 9, "bold")).grid(row=0, column=5, padx=2)
-
-    def create_table_row(self, cylinder, row_num):
-        """Create a table row with checkbox and radio buttons for status."""
-        row_frame = ttk.Frame(self.scrollable_frame)
-        row_frame.pack(fill=tk.X, pady=1)
-
-        # Checkbox for selection
-        check_var = tk.BooleanVar(value=False)
-        self.check_vars[cylinder.id] = check_var
-        cb = tk.Checkbutton(row_frame, variable=check_var)
-        cb.grid(row=0, column=0, padx=2)
-
-        # ID
-        ttk.Label(row_frame, text=str(cylinder.id), width=5).grid(row=0, column=1, padx=2)
-
-        # Cylinder ID
-        ttk.Label(row_frame, text=cylinder.cylinder_id, width=15).grid(row=0, column=2, padx=2)
-
-        # Type
-        ttk.Label(row_frame, text=cylinder.cylinder_type, width=15).grid(row=0, column=3, padx=2)
-
-        # Status as text
-        ttk.Label(row_frame, text=cylinder.status.capitalize(), width=15).grid(row=0, column=4, padx=2)
-
-        # Location
-        ttk.Label(row_frame, text=cylinder.location or '', width=15).grid(row=0, column=5, padx=2)
-
-
-    def refresh_table(self):
-        """Refresh the table display."""
-        # Clear existing rows
-        for widget in self.scrollable_frame.winfo_children():
-            if widget != self.scrollable_frame.winfo_children()[0]:  # Keep header
-                widget.destroy()
-
-        self.check_vars = {}
-        self.select_all_var.set(False)
-        for i, cylinder_row in enumerate(self.cylinders, 1):
-            cylinder = Cylinder.from_db_row(cylinder_row)
-            self.create_table_row(cylinder, i)
+        if state:
+            # Select all
+            for item in self.tree.get_children():
+                values = self.tree.item(item, 'values')
+                cylinder_id = values[1]
+                self.selected_items.add(cylinder_id)
+                self.tree.set(item, 'Select', '✓')
+                self.tree.item(item, tags=('selected',))
+        else:
+            # Deselect all
+            self.selected_items.clear()
+            for item in self.tree.get_children():
+                self.tree.set(item, 'Select', '')
+                self.tree.item(item, tags=('unselected',))
 
     def load_cylinders(self):
         """Load cylinders from database."""
-        # Clear existing rows
-        for widget in self.scrollable_frame.winfo_children():
-            if widget != self.scrollable_frame.winfo_children()[0]:  # Keep header
-                widget.destroy()
+        # Clear selection
+        self.selected_items.clear()
+        self.select_all_var.set(False)
+        
+        for item in self.tree.get_children():
+            self.tree.delete(item)
 
         self.cylinders = get_all_cylinders()
-        self.check_vars = {}  # Store checkbox variables
-        self.select_all_var.set(False)
-
-        for i, cylinder_row in enumerate(self.cylinders, 1):
+        
+        for cylinder_row in self.cylinders:
             cylinder = Cylinder.from_db_row(cylinder_row)
-            self.create_table_row(cylinder, i)
+            is_selected = cylinder.id in self.selected_items
+            select_text = '✓' if is_selected else ''
+            tags = ('selected',) if is_selected else ('unselected',)
+            self.tree.insert('', tk.END, values=(
+                select_text,
+                cylinder.id,
+                cylinder.cylinder_id,
+                cylinder.cylinder_type,
+                cylinder.status.capitalize(),
+                cylinder.location or ''
+            ), tags=tags)
 
     def on_search(self, event=None):
         """Handle search functionality."""
@@ -205,16 +207,6 @@ class InventoryManagementFrame(ttk.Frame):
             self.cylinders = [c for c in all_cylinders if Cylinder.from_db_row(c).status == current_status.lower()]
         self.refresh_table()
 
-    def get_current_status(self):
-        """Get the currently selected status tab."""
-        current_tab = self.status_notebook.index(self.status_notebook.select())
-        return self.status_notebook.tab(current_tab, "text")
-
-    def on_tab_changed(self, event):
-        """Handle tab change to filter by status."""
-        status = self.get_current_status()
-        self.on_filter_status(status)
-
     def on_filter_status(self, status):
         """Handle status filtering."""
         query = self.search_var.get().strip()
@@ -227,6 +219,35 @@ class InventoryManagementFrame(ttk.Frame):
         else:
             self.cylinders = [c for c in all_cylinders if Cylinder.from_db_row(c).status == status.lower()]
         self.refresh_table()
+
+    def refresh_table(self):
+        """Refresh the table display."""
+        for item in self.tree.get_children():
+            self.tree.delete(item)
+
+        for cylinder_row in self.cylinders:
+            cylinder = Cylinder.from_db_row(cylinder_row)
+            is_selected = cylinder.id in self.selected_items
+            select_text = '✓' if is_selected else ''
+            tags = ('selected',) if is_selected else ('unselected',)
+            self.tree.insert('', tk.END, values=(
+                select_text,
+                cylinder.id,
+                cylinder.cylinder_id,
+                cylinder.cylinder_type,
+                cylinder.status.capitalize(),
+                cylinder.location or ''
+            ), tags=tags)
+
+    def get_current_status(self):
+        """Get the currently selected status tab."""
+        current_tab = self.status_notebook.index(self.status_notebook.select())
+        return self.status_notebook.tab(current_tab, "text")
+
+    def on_tab_changed(self, event):
+        """Handle tab change to filter by status."""
+        status = self.get_current_status()
+        self.on_filter_status(status)
 
     def add_cylinder(self):
         """Add new cylinder dialog."""
@@ -280,18 +301,23 @@ class InventoryManagementFrame(ttk.Frame):
 
     def update_status(self):
         """Update status of selected cylinders."""
-        selected_ids = [cid for cid, var in self.check_vars.items() if var.get()]
+        selected_ids = list(self.selected_items)
         if not selected_ids:
             messagebox.showwarning("Warning", "Please select cylinders to update status.")
             return
 
+        # Get all cylinders from database to search through (not just filtered ones)
+        all_cylinders = get_all_cylinders()
+        
         # Filter to cylinders with 'refill' or 'returned' status
         valid_ids = []
         for cid in selected_ids:
-            for row in self.cylinders:
-                if row[0] == cid:
+            # Convert cid to int since treeview values are strings
+            cid_int = int(cid)
+            for row in all_cylinders:
+                if row[0] == cid_int:
                     cylinder = Cylinder.from_db_row(row)
-                    if cylinder.status in ['refill', 'returned']:
+                    if cylinder.status in ['refill', 'returned', 'Refill', 'Returned']:
                         valid_ids.append(cid)
                     break
 
@@ -313,11 +339,13 @@ class InventoryManagementFrame(ttk.Frame):
         try:
             updated_count = 0
             for cid in valid_ids:
-                # Find cylinder data
-                for row in self.cylinders:
-                    if row[0] == cid:
+                # Convert cid to int since treeview values are strings
+                cid_int = int(cid)
+                # Find cylinder data from all cylinders
+                for row in all_cylinders:
+                    if row[0] == cid_int:
                         cylinder = Cylinder.from_db_row(row)
-                        update_cylinder(cid, cylinder.cylinder_type, new_status, cylinder.location)
+                        update_cylinder(cid_int, cylinder.cylinder_type, new_status, cylinder.location)
                         updated_count += 1
                         break
             self.load_cylinders()

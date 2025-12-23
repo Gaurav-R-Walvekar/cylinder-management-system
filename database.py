@@ -15,14 +15,20 @@ def get_connection():
     return sqlite3.connect(DATABASE_FILE)
 
 def generate_dc_number():
-    """Generate a unique DC number."""
+    """Generate the next available DC number as the highest existing incremented by 1."""
     conn = get_connection()
     cursor = conn.cursor()
-    cursor.execute("SELECT COUNT(*) FROM dispatches")
-    count = cursor.fetchone()[0]
+    cursor.execute("SELECT dc_number FROM dispatches WHERE dc_number LIKE 'DC%' ORDER BY CAST(SUBSTR(dc_number, 3) AS INTEGER) DESC LIMIT 1")
+    result = cursor.fetchone()
     conn.close()
-    # Generate DC number like DC001, DC002, etc.
-    return f"DC{count + 1:03d}"
+    if result:
+        dc_str = result[0]
+        try:
+            num = int(dc_str[2:])
+            return f"DC{num + 1:03d}"
+        except ValueError:
+            pass
+    return "DC001"
 
 def init_database():
     """Initialize database and create tables if they don't exist."""
@@ -67,18 +73,26 @@ def init_database():
             dispatch_notes TEXT,
             return_notes TEXT,
             status TEXT NOT NULL DEFAULT 'dispatched',
-            grade TEXT,
+            grade TEXT NOT NULL DEFAULT '',
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (customer_id) REFERENCES customers (id),
             FOREIGN KEY (cylinder_id) REFERENCES cylinders (id)
         )
     ''')
 
-    # Add grade column if it doesn't exist (for existing databases)
+    # Update existing NULL grades to empty string
+    cursor.execute("UPDATE dispatches SET grade = '' WHERE grade IS NULL")
+
+    # Add grade column with NOT NULL if it doesn't exist (for existing databases)
     try:
-        cursor.execute("ALTER TABLE dispatches ADD COLUMN grade TEXT")
+        cursor.execute("ALTER TABLE dispatches ADD COLUMN grade TEXT NOT NULL DEFAULT ''")
     except sqlite3.OperationalError:
         pass  # Column already exists
+        # Ensure NOT NULL constraint by recreating table if needed
+        try:
+            cursor.execute("UPDATE dispatches SET grade = '' WHERE grade IS NULL")
+        except:
+            pass
 
     # Create users table for authentication
     cursor.execute('''
@@ -243,16 +257,36 @@ def dispatch_cylinders(customer_id, cylinder_ids, dispatch_date, dispatch_notes,
     except ValueError:
         raise ValueError("Invalid dispatch date format. Use YYYY-MM-DD")
 
+    conn = get_connection()
+    cursor = conn.cursor()
+
+    if dc_number:
+        # Check if custom DC number already exists
+        cursor.execute("SELECT customer_id FROM dispatches WHERE dc_number = ?", (dc_number,))
+        existing = cursor.fetchone()
+        if existing:
+            if existing[0] != customer_id:
+                # Check if all dispatches under this DC have been returned (have return_date)
+                cursor.execute("SELECT COUNT(*) FROM dispatches WHERE dc_number = ? AND return_date IS NULL", (dc_number,))
+                unreturned_count = cursor.fetchone()[0]
+                if unreturned_count > 0:
+                    conn.close()
+                    raise ValueError(f"DC number {dc_number} has unreturned cylinders. Please choose a different DC number.")
+                # All returned, delete the old dispatches to allow reuse
+                cursor.execute("DELETE FROM dispatches WHERE dc_number = ?", (dc_number,))
+            else:
+                # Same customer, check if it has any dispatched cylinders
+                cursor.execute("SELECT COUNT(*) FROM dispatches WHERE dc_number = ? AND status = 'dispatched'", (dc_number,))
+                dispatched_count = cursor.fetchone()[0]
+                if dispatched_count == 0:
+                    # No dispatched cylinders, remove existing dispatches under this DC
+                    cursor.execute("DELETE FROM dispatches WHERE dc_number = ?", (dc_number,))
+                    dc_number = None  # Force generation of new DC number
+
     if not dc_number:
         dc_number = generate_dc_number()
-    else:
-        # Check if custom DC number already exists
-        conn = get_connection()
-        cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM dispatches WHERE dc_number = ?", (dc_number,))
-        if cursor.fetchone()[0] > 0:
-            conn.close()
-            raise ValueError(f"DC number {dc_number} already exists. Please choose a different DC number.")
+
+    # Now proceed to add new dispatches
 
     try:
         # First, verify all cylinders are available
@@ -313,6 +347,12 @@ def return_cylinders(dc_number, cylinder_ids, return_date, return_notes):
             ''', (return_date, return_notes, dispatch_id))
             # Update cylinder status to returned
             cursor.execute("UPDATE cylinders SET status = 'returned' WHERE id = ?", (cylinder_id,))
+        # Check if all dispatches for this DC are returned
+        cursor.execute("SELECT COUNT(*) FROM dispatches WHERE dc_number = ? AND status != 'returned'", (dc_number,))
+        count_dispatched = cursor.fetchone()[0]
+        if count_dispatched == 0:
+            # All returned, delete the dispatches
+            cursor.execute("DELETE FROM dispatches WHERE dc_number = ?", (dc_number,))
         conn.commit()
     finally:
         conn.close()
