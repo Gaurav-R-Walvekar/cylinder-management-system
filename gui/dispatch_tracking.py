@@ -34,6 +34,8 @@ class DispatchTrackingFrame(ttk.Frame):
         self.available_cylinders = []
         self.selected_items = set()  # For checkbox selection
         self.cyl_history_selected = set()  # For available cylinders history selection
+        self.available_company_filter_var = tk.StringVar(value="All")
+        self.available_dc_filter_var = tk.StringVar(value="All")
         self.load_customers()
         self.load_available_cylinders()
         self.create_widgets()
@@ -89,7 +91,7 @@ class DispatchTrackingFrame(ttk.Frame):
 
         tk.Label(dispatch_frame, text="Dispatch Date:").grid(row=1, column=0, padx=5, pady=3, sticky="w")
         self.dispatch_date_entry = tk.Entry(dispatch_frame, width=30)
-        self.dispatch_date_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
+        self.dispatch_date_entry.insert(0, datetime.now().strftime("%d-%m-%Y"))
         self.dispatch_date_entry.grid(row=1, column=1, padx=5, pady=3, sticky="ew")
 
         tk.Label(dispatch_frame, text="DC Number:").grid(row=2, column=0, padx=5, pady=3, sticky="w")
@@ -164,7 +166,7 @@ class DispatchTrackingFrame(ttk.Frame):
 
         tk.Label(return_frame, text="Return Date:").grid(row=2, column=0, padx=5, pady=3, sticky="w")
         self.return_date_entry = tk.Entry(return_frame, width=30)
-        self.return_date_entry.insert(0, datetime.now().strftime("%Y-%m-%d"))
+        self.return_date_entry.insert(0, datetime.now().strftime("%d-%m-%Y"))
         self.return_date_entry.grid(row=2, column=1, padx=5, pady=3, sticky="ew")
 
         # Configure grid weights for return frame
@@ -287,15 +289,28 @@ class DispatchTrackingFrame(ttk.Frame):
         # Filter controls for available cylinders
         filter_cyl_frame = ttk.Frame(available_container)
         filter_cyl_frame.pack(fill=tk.X, padx=5, pady=5)
-        
+
         ttk.Label(filter_cyl_frame, text="Filter by Status:").pack(side=tk.LEFT, padx=(0, 5))
         self.available_filter_var = tk.StringVar(value="available")
         self.available_filter_combo = ttk.Combobox(filter_cyl_frame, textvariable=self.available_filter_var,
-                                                     values=["All", "available", "dispatched", "returned"],
-                                                     state="readonly", width=15)
+                                                      values=["All", "available", "dispatched", "returned"],
+                                                      state="readonly", width=15)
         self.available_filter_combo.pack(side=tk.LEFT, padx=5)
         self.available_filter_combo.bind('<<ComboboxSelected>>', self.load_available_cylinders_history)
-        
+
+        ttk.Label(filter_cyl_frame, text="Filter by Company:").pack(side=tk.LEFT, padx=(5, 5))
+        self.available_company_filter_combo = ttk.Combobox(filter_cyl_frame, textvariable=self.available_company_filter_var,
+                                                          values=["All"] + [f"{c[0]} - {c[1]}" for c in self.customers],
+                                                          state="readonly", width=22)
+        self.available_company_filter_combo.pack(side=tk.LEFT, padx=5)
+        self.available_company_filter_combo.bind('<<ComboboxSelected>>', self.load_available_cylinders_history)
+
+        ttk.Label(filter_cyl_frame, text="Filter by DC:").pack(side=tk.LEFT, padx=(5, 5))
+        self.available_dc_filter_combo = ttk.Combobox(filter_cyl_frame, textvariable=self.available_dc_filter_var,
+                                                     values=["All"], state="readonly", width=15)
+        self.available_dc_filter_combo.pack(side=tk.LEFT, padx=5)
+        self.available_dc_filter_combo.bind('<<ComboboxSelected>>', self.load_available_cylinders_history)
+
         ttk.Button(filter_cyl_frame, text="Refresh", command=self.load_available_cylinders_history).pack(side=tk.RIGHT, padx=5)
         
         # Treeview container with scrollbars
@@ -375,28 +390,30 @@ class DispatchTrackingFrame(ttk.Frame):
         # Check if the filter variable exists (may not exist if called before widgets are created)
         if not hasattr(self, 'available_filter_var'):
             return
-        
+
         filter_status = self.available_filter_var.get()
-        
+        filter_company = self.available_company_filter_var.get()
+        filter_dc = self.available_dc_filter_var.get()
+
         # Clear current items
         for item in self.cyl_history_tree.get_children():
             self.cyl_history_tree.delete(item)
-        
+
         conn = get_connection()
         cursor = conn.cursor()
-        
+
         # Get all cylinders with their current status
         if filter_status == "All":
             cursor.execute("SELECT id, cylinder_id, cylinder_type, status, location FROM cylinders ORDER BY cylinder_id")
         else:
             cursor.execute("SELECT id, cylinder_id, cylinder_type, status, location FROM cylinders WHERE status = ? ORDER BY cylinder_id", (filter_status,))
-        
+
         cylinders = cursor.fetchall()
-        
+
         for cyl_id, cylinder_id_text, cyl_type, status, location in cylinders:
             # Get last dispatch history for this cylinder
             cursor.execute('''
-                SELECT d.dc_number, c.name, d.dispatch_date, d.return_date, d.grade
+                SELECT d.dc_number, c.id, c.name, d.dispatch_date, d.return_date, d.grade
                 FROM dispatches d
                 JOIN customers c ON d.customer_id = c.id
                 WHERE d.cylinder_id = ?
@@ -404,22 +421,34 @@ class DispatchTrackingFrame(ttk.Frame):
                 LIMIT 1
             ''', (cyl_id,))
             history = cursor.fetchone()
-            
+
             if history:
-                last_dc, last_customer, last_dispatch_date, last_return_date, last_grade = history
+                last_dc, last_customer_id, last_customer, last_dispatch_date, last_return_date, last_grade = history
             else:
                 last_dc = "N/A"
+                last_customer_id = None
                 last_customer = "N/A"
                 last_dispatch_date = "N/A"
                 last_return_date = "N/A"
                 last_grade = "N/A"
-            
+
+            # Apply company filter
+            if filter_company != "All":
+                company_id = int(filter_company.split(' - ')[0])
+                if last_customer_id != company_id:
+                    continue
+
+            # Apply DC filter
+            if filter_dc != "All":
+                if last_dc != filter_dc:
+                    continue
+
             current_location = location if location else "Warehouse"
-            
+
             # Determine if this cylinder is selected
             cyl_id_str = str(cyl_id)
             is_selected = cyl_id_str in self.cyl_history_selected
-            
+
             # Store tags with status, cylinder ID, and selection state
             status_tag = status
             selection_tag = 'selected' if is_selected else 'unselected'
@@ -435,7 +464,7 @@ class DispatchTrackingFrame(ttk.Frame):
                 last_return_date,
                 last_grade or 'N/A'
             ), tags=(status_tag, cyl_id_str, selection_tag))  # Store status, cyl_id, and selection as tags
-        
+
         conn.close()
 
     def load_customers(self):
@@ -500,6 +529,8 @@ class DispatchTrackingFrame(ttk.Frame):
         all_dc_numbers = list(set(d[1] for d in self.dispatches))
         all_dc_numbers.sort(reverse=True)
         self.dc_filter_combo['values'] = ["All"] + all_dc_numbers
+        if hasattr(self, 'available_dc_filter_combo'):
+            self.available_dc_filter_combo['values'] = ["All"] + all_dc_numbers
 
         # Apply current filters
         self.on_filter_change()
@@ -601,6 +632,13 @@ class DispatchTrackingFrame(ttk.Frame):
             title_style = styles['Heading1']
             title_style.alignment = 1  # Center
             story.append(Paragraph(bill_title, title_style))
+            story.append(Spacer(1, 12))
+
+            # Company Title and Subtitle
+            company_title = "SPEC GASES & EQUIPMENTS"
+            company_subtitle = "Door No. 2-4, Plot No. 408, Near Ganesh Kaman, B.N. Reddy Nagar, Cherlapally, Hyderabad - 500 051. Mobile : 98491 28904, 99491 22206 E-mail : spec_equipe@rediffmail.com"
+            story.append(Paragraph(company_title, title_style))
+            story.append(Paragraph(company_subtitle, styles['Normal']))
             story.append(Spacer(1, 12))
 
             # Company Header
@@ -1075,7 +1113,7 @@ class DispatchTrackingFrame(ttk.Frame):
             messagebox.showerror("Error", "Please select at least one cylinder to return.")
             return
         
-        return_date = datetime.now().strftime("%Y-%m-%d")
+        return_date = datetime.now().strftime("%d-%m-%Y")
         return_notes = ""
         
         try:
@@ -1176,7 +1214,7 @@ class DispatchTrackingFrame(ttk.Frame):
             messagebox.showerror("Error", "Please select at least one cylinder to return.")
             return
 
-        return_date = datetime.now().strftime("%Y-%m-%d")  # Use current date
+        return_date = datetime.now().strftime("%d-%m-%Y")  # Use current date
         return_notes = ""
 
         try:

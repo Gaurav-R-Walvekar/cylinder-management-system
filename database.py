@@ -253,9 +253,9 @@ def dispatch_cylinders(customer_id, cylinder_ids, dispatch_date, dispatch_notes,
 
     # Validate date format
     try:
-        datetime.strptime(dispatch_date, "%Y-%m-%d")
+        datetime.strptime(dispatch_date, "%d-%m-%Y")
     except ValueError:
-        raise ValueError("Invalid dispatch date format. Use YYYY-MM-DD")
+        raise ValueError("Invalid dispatch date format. Use DD-MM-YYYY")
 
     conn = get_connection()
     cursor = conn.cursor()
@@ -321,9 +321,9 @@ def return_cylinders(dc_number, cylinder_ids, return_date, return_notes):
 
     # Validate date format
     try:
-        datetime.strptime(return_date, "%Y-%m-%d")
+        datetime.strptime(return_date, "%d-%m-%Y")
     except ValueError:
-        raise ValueError("Invalid return date format. Use YYYY-MM-DD")
+        raise ValueError("Invalid return date format. Use DD-MM-YYYY")
 
     conn = get_connection()
     cursor = conn.cursor()

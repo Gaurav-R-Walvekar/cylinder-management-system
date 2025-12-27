@@ -51,7 +51,7 @@ class MainWindow:
         header_frame.pack(fill=tk.X, side=tk.TOP)
         header_frame.pack_propagate(False)
 
-        title_label = tk.Label(header_frame, text="Cylinder Management System",
+        title_label = tk.Label(header_frame, text="SPEC GASES & EQUIPMENTS CYLINDER MANAGEMENT SYSTEM ",
                               font=('Arial', 16, 'bold'), fg='white', bg='#2c3e50')
         title_label.pack(pady=12)
 
@@ -119,6 +119,8 @@ class MainWindow:
         if tab_text == "Inventory Management" and self.inventory_frame:
             # Refresh inventory frame data
             self.inventory_frame.load_cylinders()
+            # Move sub tab to "All"
+            self.inventory_frame.status_notebook.select(0)
         elif tab_text == "Dispatch & Returns" and self.dispatch_frame:
             # Refresh dispatch frame data
             self.dispatch_frame.load_customers()

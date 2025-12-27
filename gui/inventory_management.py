@@ -253,16 +253,24 @@ class InventoryManagementFrame(ttk.Frame):
         """Add new cylinder dialog."""
         dialog = CylinderDialog(self, "Add Cylinder")
         if dialog.result:
-            try:
-                cylinder_id, cylinder_type, status, location = dialog.result
-                if not cylinder_id.strip() or not cylinder_type.strip():
-                    messagebox.showerror("Error", "Cylinder ID and Type are required.")
-                    return
-                add_cylinder(cylinder_id, cylinder_type, status, location)
-                self.load_cylinders()
-                messagebox.showinfo("Success", "Cylinder added successfully.")
-            except Exception as e:
-                messagebox.showerror("Error", f"Failed to add cylinder: {e}")
+            cylinder_ids, cylinder_type, status, location = dialog.result
+            if not cylinder_ids or not cylinder_type.strip():
+                messagebox.showerror("Error", "Cylinder ID(s) and Type are required.")
+                return
+            added_count = 0
+            failed_ids = []
+            for cylinder_id in cylinder_ids:
+                if cylinder_id.strip():
+                    try:
+                        add_cylinder(cylinder_id.strip(), cylinder_type, status, location)
+                        added_count += 1
+                    except Exception as e:
+                        failed_ids.append(cylinder_id.strip())
+            self.load_cylinders()
+            if added_count > 0:
+                messagebox.showinfo("Success", f"{added_count} cylinder(s) added successfully.")
+            if failed_ids:
+                messagebox.showwarning("Warning", f"Failed to add cylinders: {', '.join(failed_ids)} (may already exist)")
 
     def edit_cylinder(self):
         """Edit selected cylinder."""
@@ -273,9 +281,9 @@ class InventoryManagementFrame(ttk.Frame):
         dialog = CylinderDialog(self, "Edit Cylinder", cylinder_data)
         if dialog.result:
             try:
-                cylinder_id, cylinder_type, status, location = dialog.result
-                if not cylinder_id.strip() or not cylinder_type.strip():
-                    messagebox.showerror("Error", "Cylinder ID and Type are required.")
+                cylinder_ids, cylinder_type, status, location = dialog.result
+                if not cylinder_ids or not cylinder_type.strip():
+                    messagebox.showerror("Error", "Cylinder ID(s) and Type are required.")
                     return
                 update_cylinder(cylinder_data.id, cylinder_type, status, location)
                 self.load_cylinders()
@@ -284,20 +292,38 @@ class InventoryManagementFrame(ttk.Frame):
                 messagebox.showerror("Error", f"Failed to update cylinder: {e}")
 
     def delete_cylinder(self):
-        """Delete selected cylinder."""
-        cylinder_data = self.select_cylinder()
-        if not cylinder_data:
+        """Delete selected cylinders."""
+        selected_ids = list(self.selected_items)
+        if not selected_ids:
+            messagebox.showwarning("Warning", "Please select cylinders to delete.")
             return
 
-        if not messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete cylinder {cylinder_data.cylinder_id}?"):
+        # Get all cylinders to check status
+        all_cylinders = get_all_cylinders()
+        deletable = []
+        for cid in selected_ids:
+            cid_int = int(cid)
+            for row in all_cylinders:
+                if row[0] == cid_int:
+                    cylinder = Cylinder.from_db_row(row)
+                    if cylinder.status.lower() == 'available':
+                        deletable.append(cid_int)
+                    break
+
+        if not deletable:
+            messagebox.showerror("Error", "No selected cylinders are available for deletion.")
+            return
+
+        if not messagebox.askyesno("Confirm Delete", f"Are you sure you want to delete {len(deletable)} selected available cylinders?"):
             return
 
         try:
-            delete_cylinder(cylinder_data.id)
+            for cid in deletable:
+                delete_cylinder(cid)
             self.load_cylinders()
-            messagebox.showinfo("Success", "Cylinder deleted successfully.")
+            messagebox.showinfo("Success", f"{len(deletable)} cylinders deleted successfully.")
         except Exception as e:
-            messagebox.showerror("Error", f"Failed to delete cylinder: {e}")
+            messagebox.showerror("Error", f"Failed to delete cylinders: {e}")
 
     def update_status(self):
         """Update status of selected cylinders."""
@@ -439,6 +465,7 @@ class CylinderDialog:
         self.product_options = ['Oxygen', 'Nitrogen', 'Argon', 'Hydrogen', 'Carbon dioxide', 'Zero air', 'Helium', 'Dissolved Acetylene', 'Liquid nitrogen', 'Nitrous oxide', 'Mixtures', 'Medical Oxygen']
         self.dialog = tk.Toplevel(parent)
         self.dialog.title(title)
+        self.title = title
         self.dialog.geometry("400x300")
         self.dialog.resizable(False, False)
         self.dialog.transient(parent)
@@ -450,7 +477,8 @@ class CylinderDialog:
     def create_widgets(self, cylinder):
         """Create dialog widgets."""
         # Labels and entries
-        ttk.Label(self.dialog, text="Cylinder ID:").grid(row=0, column=0, padx=10, pady=5, sticky="w")
+        label_text = "Cylinder ID(s) :" if "Add" in self.title else "Cylinder ID:"
+        ttk.Label(self.dialog, text=label_text).grid(row=0, column=0, padx=10, pady=5, sticky="w")
         self.cylinder_id_entry = ttk.Entry(self.dialog, width=30)
         self.cylinder_id_entry.grid(row=0, column=1, padx=10, pady=5)
 
@@ -487,7 +515,8 @@ class CylinderDialog:
 
     def save(self):
         """Save cylinder data."""
-        cylinder_id = self.cylinder_id_entry.get().strip()
+        cylinder_id_str = self.cylinder_id_entry.get().strip()
+        cylinder_ids = [id.strip() for id in cylinder_id_str.split(',') if id.strip()]
         cylinder_type = self.product_var.get().strip()
         status = self.status_var.get()
         location = self.location_entry.get().strip()
@@ -495,7 +524,7 @@ class CylinderDialog:
         if not status:
             status = 'available'  # Default status
 
-        self.result = (cylinder_id, cylinder_type, status, location)
+        self.result = (cylinder_ids, cylinder_type, status, location)
         self.dialog.destroy()
 
     def cancel(self):
