@@ -105,10 +105,14 @@ class DispatchTrackingFrame(ttk.Frame):
         self.grade_entry = tk.Entry(dispatch_frame, width=30)
         self.grade_entry.grid(row=3, column=1, padx=5, pady=3, sticky="ew")
 
-        tk.Label(dispatch_frame, text="Available Cylinders:").grid(row=4, column=0, padx=5, pady=3, sticky="nw")
+        tk.Label(dispatch_frame, text="Vehicle Number:*").grid(row=4, column=0, padx=5, pady=3, sticky="w")
+        self.vehicle_number_entry = tk.Entry(dispatch_frame, width=30)
+        self.vehicle_number_entry.grid(row=4, column=1, padx=5, pady=3, sticky="ew")
+
+        tk.Label(dispatch_frame, text="Available Cylinders:").grid(row=5, column=0, padx=5, pady=3, sticky="nw")
         # Frame for listbox and scrollbar
         cylinder_frame = tk.Frame(dispatch_frame)
-        cylinder_frame.grid(row=4, column=1, padx=5, pady=3, sticky="ew")
+        cylinder_frame.grid(row=5, column=1, padx=5, pady=3, sticky="ew")
         # Listbox for multiple cylinder selection
         self.cylinder_listbox = tk.Listbox(cylinder_frame, selectmode=tk.MULTIPLE, height=4, width=32)
         self.cylinder_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
@@ -121,16 +125,16 @@ class DispatchTrackingFrame(ttk.Frame):
         for cylinder in self.available_cylinders:
             self.cylinder_listbox.insert(tk.END, f"{cylinder[0]} - {cylinder[1]} ({cylinder[2]})")
 
-        tk.Label(dispatch_frame, text="Manual Cylinder IDs:").grid(row=5, column=0, padx=5, pady=3, sticky="w")
+        tk.Label(dispatch_frame, text="Manual Cylinder IDs:").grid(row=6, column=0, padx=5, pady=3, sticky="w")
         self.manual_cylinder_entry = tk.Entry(dispatch_frame, width=30)
-        self.manual_cylinder_entry.grid(row=5, column=1, padx=5, pady=3, sticky="ew")
+        self.manual_cylinder_entry.grid(row=6, column=1, padx=5, pady=3, sticky="ew")
         self.manual_cylinder_entry.bind('<Return>', lambda e: self.update_selected_cylinders())
-        tk.Label(dispatch_frame, text="(Comma-separated IDs)", font=("Arial", 8)).grid(row=6, column=1, padx=5, pady=0, sticky="w")
+        tk.Label(dispatch_frame, text="(Comma-separated IDs)", font=("Arial", 8)).grid(row=7, column=1, padx=5, pady=0, sticky="w")
 
-        tk.Label(dispatch_frame, text="Selected Cylinders:").grid(row=7, column=0, padx=5, pady=3, sticky="nw")
+        tk.Label(dispatch_frame, text="Selected Cylinders:").grid(row=8, column=0, padx=5, pady=3, sticky="nw")
         # Frame for listbox and scrollbar
         selected_frame = tk.Frame(dispatch_frame)
-        selected_frame.grid(row=7, column=1, padx=5, pady=3, sticky="ew")
+        selected_frame.grid(row=8, column=1, padx=5, pady=3, sticky="ew")
         self.selected_cylinders_listbox = tk.Listbox(selected_frame, height=3, width=32)
         self.selected_cylinders_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         selected_scrollbar = tk.Scrollbar(selected_frame, orient=tk.VERTICAL, command=self.selected_cylinders_listbox.yview)
@@ -141,7 +145,7 @@ class DispatchTrackingFrame(ttk.Frame):
         # Configure grid weights for dispatch frame
         dispatch_frame.grid_columnconfigure(1, weight=1)
 
-        ttk.Button(dispatch_frame, text="Dispatch Selected", command=self.dispatch_cylinders).grid(row=8, column=0, columnspan=2, pady=10)
+        ttk.Button(dispatch_frame, text="Dispatch Selected", command=self.dispatch_cylinders).grid(row=9, column=0, columnspan=2, pady=10)
 
         # Return section
         return_frame = ttk.LabelFrame(scrollable_frame, text="Return Cylinders", padding=5)
@@ -221,7 +225,7 @@ class DispatchTrackingFrame(ttk.Frame):
         tree_container.pack(fill=tk.BOTH, expand=True, padx=5, pady=5)
 
         # Treeview for dispatches
-        columns = ('Select', 'ID', 'DC Number', 'Customer', 'Cylinder ID', 'Cylinder Type', 'Grade', 'Dispatch Date', 'Return Date', 'Status', 'Delete')
+        columns = ('Select', 'ID', 'DC Number', 'Customer', 'Cylinder ID', 'Cylinder Type', 'Grade', 'Vehicle Number', 'Dispatch Date', 'Return Date', 'Status', 'Delete')
         self.tree = ttk.Treeview(tree_container, columns=columns, show='headings', height=15)
 
         # Style the treeview
@@ -254,6 +258,8 @@ class DispatchTrackingFrame(ttk.Frame):
                 self.tree.column(col, width=90)
             elif col == 'Grade':
                 self.tree.column(col, width=70)
+            elif col == 'Vehicle Number':
+                self.tree.column(col, width=100)
             elif col == 'Delete':
                 self.tree.column(col, width=50, anchor='center')
             else:
@@ -517,7 +523,7 @@ class DispatchTrackingFrame(ttk.Frame):
             select_text = '✓' if is_selected else ''
             tags = (dispatch.status, 'selected' if is_selected else 'unselected')
             values = (select_text, dispatch.id, dispatch.dc_number, dispatch.customer_name, dispatch.cylinder_id_text,
-                      dispatch.cylinder_type, dispatch.grade or '', dispatch.dispatch_date, dispatch.return_date, dispatch.status, delete_text)
+                      dispatch.cylinder_type, dispatch.grade or '', dispatch.vehicle_number or '', dispatch.dispatch_date, dispatch.return_date, dispatch.status, delete_text)
             self.tree.insert('', tk.END, values=values, tags=tags)
 
         # Update DC combo with unique DC numbers that have dispatched cylinders
@@ -587,7 +593,7 @@ class DispatchTrackingFrame(ttk.Frame):
 
         # Get dispatches
         cursor.execute('''
-            SELECT d.dc_number, d.dispatch_date, d.return_date, d.status, cy.cylinder_id, cy.cylinder_type, d.grade, d.dispatch_notes, d.return_notes
+            SELECT d.dc_number, d.dispatch_date, d.return_date, d.status, cy.cylinder_id, cy.cylinder_type, d.grade, d.vehicle_number, d.dispatch_notes, d.return_notes
             FROM dispatches d
             JOIN cylinders cy ON d.cylinder_id = cy.id
             WHERE d.dc_number = ?
@@ -655,13 +661,13 @@ class DispatchTrackingFrame(ttk.Frame):
             story.append(Spacer(1, 12))
 
             # Table data
-            data = [['DC Number', 'Cylinder ID', 'Type', 'Grade', 'Dispatch Date', 'Return Date', 'Status']]
+            data = [['DC Number', 'Cylinder ID', 'Type', 'Grade', 'Vehicle Number', 'Dispatch Date', 'Return Date', 'Status']]
             total_cylinders = 0
             dispatched_count = 0
             returned_count = 0
 
-            for dc, disp_date, ret_date, status, cyl_id, cyl_type, grade, disp_notes, ret_notes in bill_data['dispatches']:
-                data.append([dc, cyl_id, cyl_type, grade or '', disp_date, ret_date or '', status])
+            for dc, disp_date, ret_date, status, cyl_id, cyl_type, grade, vehicle_number, disp_notes, ret_notes in bill_data['dispatches']:
+                data.append([dc, cyl_id, cyl_type, grade or '', vehicle_number or '', disp_date, ret_date or '', status])
                 total_cylinders += 1
                 if status == 'dispatched':
                     dispatched_count += 1
@@ -729,7 +735,7 @@ class DispatchTrackingFrame(ttk.Frame):
 
         # Get dispatches
         cursor.execute('''
-            SELECT d.dc_number, d.dispatch_date, d.return_date, d.status, cy.cylinder_id, cy.cylinder_type, d.grade, d.dispatch_notes, d.return_notes
+            SELECT d.dc_number, d.dispatch_date, d.return_date, d.status, cy.cylinder_id, cy.cylinder_type, d.grade, d.vehicle_number, d.dispatch_notes, d.return_notes
             FROM dispatches d
             JOIN cylinders cy ON d.cylinder_id = cy.id
             WHERE d.customer_id = ?
@@ -776,7 +782,7 @@ class DispatchTrackingFrame(ttk.Frame):
             ws.title = "Dispatch History"
 
             # Headers
-            headers = ['Select', 'ID', 'DC Number', 'Customer', 'Cylinder ID', 'Cylinder Type', 'Grade', 'Dispatch Date', 'Return Date', 'Status', 'Delete']
+            headers = ['Select', 'ID', 'DC Number', 'Customer', 'Cylinder ID', 'Cylinder Type', 'Grade', 'Vehicle Number', 'Dispatch Date', 'Return Date', 'Status', 'Delete']
             for col_num, header in enumerate(headers, 1):
                 ws.cell(row=1, column=col_num, value=header)
 
@@ -822,7 +828,7 @@ class DispatchTrackingFrame(ttk.Frame):
             select_text = '✓' if is_selected else ''
             tags = (dispatch.status, 'selected' if is_selected else 'unselected')
             values = (select_text, dispatch.id, dispatch.dc_number, dispatch.customer_name, dispatch.cylinder_id_text,
-                      dispatch.cylinder_type, dispatch.grade or '', dispatch.dispatch_date, dispatch.return_date, dispatch.status, delete_text)
+                      dispatch.cylinder_type, dispatch.grade or '', dispatch.vehicle_number or '', dispatch.dispatch_date, dispatch.return_date, dispatch.status, delete_text)
             self.tree.insert('', tk.END, values=values, tags=tags)
 
     def on_dc_select(self, event=None):
@@ -1002,6 +1008,7 @@ class DispatchTrackingFrame(ttk.Frame):
         customer_selection = self.customer_var.get()
         dispatch_date = self.dispatch_date_entry.get().strip()
         grade = self.grade_entry.get().strip()
+        vehicle_number = self.vehicle_number_entry.get().strip()
         dispatch_notes = ""
 
         if not customer_selection:
@@ -1010,6 +1017,10 @@ class DispatchTrackingFrame(ttk.Frame):
 
         if not grade:
             messagebox.showerror("Error", "Grade is mandatory. Please enter the grade.")
+            return
+
+        if not vehicle_number:
+            messagebox.showerror("Error", "Vehicle Number is mandatory. Please enter the vehicle number.")
             return
 
         if self.selected_cylinders_listbox.size() == 0:
@@ -1034,7 +1045,7 @@ class DispatchTrackingFrame(ttk.Frame):
             dc_number = self.dc_number_var.get().strip()
             if not dc_number:
                 dc_number = None  # Will generate new one
-            dc_number = dispatch_cylinders(customer_id, cylinder_ids, dispatch_date, dispatch_notes, dc_number, grade)
+            dc_number = dispatch_cylinders(customer_id, cylinder_ids, dispatch_date, dispatch_notes, dc_number, grade, vehicle_number)
             self.load_dispatches()
             self.load_available_cylinders()
 
@@ -1042,6 +1053,7 @@ class DispatchTrackingFrame(ttk.Frame):
             # Do not clear DC number
             self.manual_cylinder_entry.delete(0, tk.END)
             self.grade_entry.delete(0, tk.END)
+            self.vehicle_number_entry.delete(0, tk.END)
             self.selected_cylinders_listbox.delete(0, tk.END)  # Clear selected cylinders after successful dispatch
             messagebox.showinfo("Success", f"Cylinders dispatched successfully under DC {dc_number}.")
         except ValueError as e:

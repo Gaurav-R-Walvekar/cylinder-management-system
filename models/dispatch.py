@@ -7,7 +7,7 @@ from database import get_connection
 
 class Dispatch:
     def __init__(self, id=None, dc_number="", customer_id=None, cylinder_id=None, dispatch_date=None, return_date=None,
-                 dispatch_notes="", return_notes="", status="dispatched", grade="", created_at=None,
+                 dispatch_notes="", return_notes="", status="dispatched", grade="", vehicle_number="", created_at=None,
                  customer_name="", cylinder_id_text="", cylinder_type=""):
         self.id = id
         self.dc_number = dc_number
@@ -19,6 +19,7 @@ class Dispatch:
         self.return_notes = return_notes
         self.status = status
         self.grade = grade
+        self.vehicle_number = vehicle_number
         self.created_at = created_at
         self.customer_name = customer_name
         self.cylinder_id_text = cylinder_id_text
@@ -38,10 +39,11 @@ class Dispatch:
             return_notes=row[7],
             status=row[8],
             grade=row[9],
-            created_at=row[10],
-            customer_name=row[11],
-            cylinder_id_text=row[12],
-            cylinder_type=row[13]
+            vehicle_number=row[10] if len(row) > 10 else "",
+            created_at=row[11] if len(row) > 11 else None,
+            customer_name=row[12] if len(row) > 12 else "",
+            cylinder_id_text=row[13] if len(row) > 13 else "",
+            cylinder_type=row[14] if len(row) > 14 else ""
         )
 
     def to_dict(self):
@@ -56,6 +58,7 @@ class Dispatch:
             'Return Date': self.return_date,
             'Status': self.status,
             'Grade': self.grade,
+            'Vehicle Number': self.vehicle_number,
             'Dispatch Notes': self.dispatch_notes,
             'Return Notes': self.return_notes
         }
